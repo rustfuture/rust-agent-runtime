@@ -1,5 +1,7 @@
 pub mod executor;
 
+use executor::{Execution, Executor};
+
 use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
@@ -91,6 +93,37 @@ impl Runtime {
     }
     pub fn task(&self, id: &str) -> Option<&Task> {
         self.tasks.get(id)
+    }
+
+    pub fn next_queued(&self) -> Option<&Task> {
+        self.tasks
+            .values()
+            .filter(|task| task.state == State::Queued)
+            .min_by(|a, b| a.id.cmp(&b.id))
+    }
+
+    pub fn run_next(
+        &mut self,
+        executor: &Executor,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+    ) -> io::Result<Option<(String, Execution)>> {
+        let Some(id) = self.next_queued().map(|task| task.id.clone()) else {
+            return Ok(None);
+        };
+        self.start(&id)?;
+        match executor.run(cwd, program, args) {
+            Ok(execution) => {
+                let success = execution.status == Some(0) && !execution.timed_out;
+                self.complete(&id, success)?;
+                Ok(Some((id, execution)))
+            }
+            Err(error) => {
+                self.complete(&id, false)?;
+                Err(error)
+            }
+        }
     }
 
     fn transition(&mut self, id: &str, state: State, reason: &str) -> io::Result<()> {
@@ -208,5 +241,34 @@ mod tests {
         }
         let rt = Runtime::open(&dir).unwrap();
         assert_eq!(rt.task("c").unwrap().state, State::Cancelled);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_persists_bounded_execution_result() {
+        let dir = temp();
+        let workspace = dir.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let executor = Executor::new(
+            &workspace,
+            ["true".to_owned()],
+            std::time::Duration::from_secs(1),
+            1024,
+        )
+        .unwrap();
+        {
+            let mut rt = Runtime::open(&dir).unwrap();
+            rt.enqueue("work-1").unwrap();
+            let (id, execution) = rt
+                .run_next(&executor, &workspace, "true", &[])
+                .unwrap()
+                .unwrap();
+            assert_eq!(id, "work-1");
+            assert_eq!(execution.status, Some(0));
+            assert_eq!(rt.task("work-1").unwrap().state, State::Succeeded);
+        }
+        let rt = Runtime::open(&dir).unwrap();
+        assert_eq!(rt.task("work-1").unwrap().state, State::Succeeded);
+        assert!(rt.next_queued().is_none());
     }
 }
