@@ -19,6 +19,8 @@ The agent loop asks a `ModelProvider` for one structured action at a time and st
 
 Workspace reads and edits accept only plain relative paths whose canonical target remains under the configured root. Reads reject oversized or non-regular files. An edit is an exact single-occurrence replacement, has a post-edit size cap, preserves permissions, syncs a temporary file, and atomically renames it over the target. Absolute paths, parent components, symlink escapes, ambiguous matches, empty matches, and new-file creation are rejected.
 
+On macOS, the executor can additionally wrap a command in an opt-in Seatbelt profile through `/usr/bin/sandbox-exec`. That profile denies network operations and filesystem writes outside the canonical workspace. This is verified with a real subprocess test. The default remains `Isolation::None` for portability, and no Linux isolation backend is claimed.
+
 ## Security boundary
 
-This is not an OS sandbox. It does not isolate network access, environment variables, filesystem access performed by an allowed command, descendants that escape the direct child, CPU/memory usage, or platform-specific privilege boundaries. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.
+Without the opt-in macOS backend, this is not an OS sandbox. Even with it, environment-variable secrecy, descendant lifecycle containment, CPU/memory usage, and all platform-specific privilege boundaries are not solved. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.

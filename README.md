@@ -27,4 +27,6 @@ The real smoke call on 2026-09-06 returned the required structured `finish` acti
 
 The first end-to-end fixture evaluation starts from a failing Rust test, gives the model only bounded file read/exact replacement and allowlisted `cargo` execution, and verifies the resulting patch in a fresh copy. See [`evaluation/agy-off-by-one.md`](evaluation/agy-off-by-one.md) for the patch, test outcome, latency, token usage, and limitations.
 
+On macOS, callers can opt into `Isolation::MacOsSandbox`. The generated Seatbelt profile denies network access and denies writes outside the canonical workspace; a platform-gated test executes a real shell and proves both the denied outside write and an allowed inside write. This backend depends on the currently installed `/usr/bin/sandbox-exec`. No equivalent Linux backend is implemented yet, so the same isolation claim is not made there.
+
 See `docs/architecture.md` for the trust boundary and `RELEASE_NOTES.md` for the current candidate scope. Licensed under MIT.

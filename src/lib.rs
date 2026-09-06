@@ -380,9 +380,14 @@ mod tests {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
     fn temp() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         std::env::temp_dir().join(format!(
-            "agent-runtime-{}-{}",
+            "agent-runtime-{}-{}-{}",
             std::process::id(),
+            nonce,
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ))
     }

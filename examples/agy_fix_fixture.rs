@@ -1,6 +1,6 @@
 use rust_agent_runtime::{
     agent::AgentLoop,
-    executor::{CancellationToken, Executor},
+    executor::{CancellationToken, Executor, Isolation},
     provider::AgyProvider,
 };
 use std::{env, io, path::Path, time::Duration};
@@ -22,6 +22,13 @@ fn main() -> io::Result<()> {
         Duration::from_secs(30),
         16 * 1024,
     )?;
+    #[cfg(target_os = "macos")]
+    let executor = executor.with_isolation(Isolation::MacOsSandbox)?;
+    #[cfg(not(target_os = "macos"))]
+    let executor = {
+        let _ = Isolation::None;
+        executor
+    };
     let agent = AgentLoop::new(8, vec!["cargo".to_owned()], 16 * 1024)?;
     let report = agent.run(
         &mut provider,
