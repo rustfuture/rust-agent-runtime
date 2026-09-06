@@ -1,6 +1,7 @@
 use crate::{
     executor::{CancellationToken, Executor},
     provider::{DecisionRequest, ModelAction, ModelDecision, ModelProvider},
+    workspace::WorkspaceEditor,
 };
 use std::{io, path::Path};
 
@@ -45,6 +46,7 @@ impl AgentLoop {
         cancellation: &CancellationToken,
     ) -> io::Result<AgentReport> {
         let mut observations = Vec::new();
+        let editor = WorkspaceEditor::new(cwd, self.max_observation_bytes)?;
         let mut decisions = Vec::new();
         let mut tool_runs = 0;
         for _ in 0..self.max_steps {
@@ -82,6 +84,21 @@ impl AgentLoop {
                         execution.stderr
                     );
                     observations.push(truncate(observation, self.max_observation_bytes));
+                }
+                ModelAction::ReadFile { path } => {
+                    let content = editor.read(&path)?;
+                    observations.push(truncate(
+                        format!("file={path}\n{content}"),
+                        self.max_observation_bytes,
+                    ));
+                }
+                ModelAction::ReplaceText {
+                    path,
+                    expected,
+                    replacement,
+                } => {
+                    editor.replace_once(&path, &expected, &replacement)?;
+                    observations.push(format!("replaced exact text in file={path}"));
                 }
             }
         }
@@ -205,5 +222,37 @@ mod tests {
                 .kind(),
             io::ErrorKind::TimedOut
         );
+    }
+
+    #[test]
+    fn reads_and_edits_only_inside_workspace() {
+        let root = workspace("edit");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(3, vec!["true".to_owned()], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReadFile {
+                path: "bug.txt".to_owned(),
+            },
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Finish {
+                summary: "fixed".to_owned(),
+            },
+        ]));
+        agent
+            .run(
+                &mut provider,
+                &executor,
+                &root,
+                "fix",
+                &CancellationToken::default(),
+            )
+            .unwrap();
+        assert_eq!(fs::read_to_string(root.join("bug.txt")).unwrap(), "good\n");
     }
 }

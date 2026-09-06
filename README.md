@@ -25,4 +25,6 @@ AGY_BIN=/path/to/agy AGY_WORK_DIR="$smoke_dir" cargo run --locked --example agy_
 
 The real smoke call on 2026-09-06 returned the required structured `finish` action in 8.522 seconds. AGY reported 35,067 input and 47 output tokens; the unexpectedly high fixed context overhead is why live model calls are kept out of normal CI and used only at explicit evaluation milestones.
 
+The first end-to-end fixture evaluation starts from a failing Rust test, gives the model only bounded file read/exact replacement and allowlisted `cargo` execution, and verifies the resulting patch in a fresh copy. See [`evaluation/agy-off-by-one.md`](evaluation/agy-off-by-one.md) for the patch, test outcome, latency, token usage, and limitations.
+
 See `docs/architecture.md` for the trust boundary and `RELEASE_NOTES.md` for the current candidate scope. Licensed under MIT.
