@@ -25,6 +25,13 @@ AGY_BIN=/path/to/agy AGY_WORK_DIR="$smoke_dir" cargo run --locked --example agy_
 
 The real smoke call on 2026-09-06 returned the required structured `finish` action in 8.522 seconds. AGY reported 35,067 input and 47 output tokens; the unexpectedly high fixed context overhead is why live model calls are kept out of normal CI and used only at explicit evaluation milestones.
 
+`AgyProvider::stream_text` consumes AGY's NDJSON event stream and emits response deltas through a callback while retaining final usage metadata. A real Rust adapter smoke returned `STREAM_OK` in 6.860 seconds with 34,752 input and 3 output tokens:
+
+```bash
+stream_dir=$(mktemp -d)
+AGY_BIN=/path/to/agy AGY_WORK_DIR="$stream_dir" cargo run --locked --example agy_stream_smoke
+```
+
 The first end-to-end fixture evaluation starts from a failing Rust test, gives the model only bounded file read/exact replacement and allowlisted `cargo` execution, and verifies the resulting patch in a fresh copy. See [`evaluation/agy-off-by-one.md`](evaluation/agy-off-by-one.md) for the patch, test outcome, latency, token usage, and limitations.
 
 On macOS, callers can opt into `Isolation::MacOsSandbox`. The generated Seatbelt profile denies network access and denies writes outside the canonical workspace; a platform-gated test executes a real shell and proves both the denied outside write and an allowed inside write. This backend depends on the currently installed `/usr/bin/sandbox-exec`. No equivalent Linux backend is implemented yet, so the same isolation claim is not made there.

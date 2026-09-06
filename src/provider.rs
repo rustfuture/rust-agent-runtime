@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    io,
+    io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -45,6 +45,14 @@ pub struct ModelDecision {
     pub output_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamResult {
+    pub model: String,
+    pub duration_ms: u128,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
 pub trait ModelProvider {
     fn decide(&mut self, request: &DecisionRequest) -> io::Result<ModelDecision>;
 }
@@ -79,6 +87,80 @@ impl AgyProvider {
 
     fn prompt(request: &DecisionRequest) -> io::Result<String> {
         serde_json::to_string(request).map_err(io::Error::other)
+    }
+
+    pub fn stream_text(
+        &mut self,
+        prompt: &str,
+        mut on_delta: impl FnMut(&str),
+    ) -> io::Result<StreamResult> {
+        let started = Instant::now();
+        let timeout = format!("{}s", self.timeout.as_secs());
+        let mut child = Command::new(&self.binary)
+            .current_dir(&self.working_dir)
+            .args([
+                "--print",
+                prompt,
+                "--model",
+                &self.model,
+                "--effort",
+                "low",
+                "--sandbox",
+                "--disable-slash-commands",
+                "--output-format",
+                "stream-json",
+                "--print-timeout",
+                &timeout,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("AGY stdout unavailable"))?;
+        let mut usage = None;
+        let mut succeeded = false;
+        for line in BufReader::new(stdout).lines() {
+            let event: serde_json::Value = serde_json::from_str(&line?)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            if event.get("event").and_then(|value| value.as_str()) == Some("step_update") {
+                if let Some(delta) = event
+                    .pointer("/step_update/text_delta")
+                    .and_then(|value| value.as_str())
+                {
+                    on_delta(delta);
+                }
+            }
+            if event.get("event").and_then(|value| value.as_str()) == Some("result") {
+                succeeded = event
+                    .pointer("/result/status")
+                    .and_then(|value| value.as_str())
+                    == Some("SUCCESS");
+                usage = Some(AgyUsage {
+                    input_tokens: event
+                        .pointer("/result/usage/input_tokens")
+                        .and_then(|value| value.as_u64()),
+                    output_tokens: event
+                        .pointer("/result/usage/output_tokens")
+                        .and_then(|value| value.as_u64()),
+                });
+            }
+        }
+        let status = child.wait()?;
+        if !status.success() || !succeeded {
+            return Err(io::Error::other(format!(
+                "AGY stream failed with status {:?}",
+                status.code()
+            )));
+        }
+        Ok(StreamResult {
+            model: self.model.clone(),
+            duration_ms: started.elapsed().as_millis(),
+            input_tokens: usage.as_ref().and_then(|item| item.input_tokens),
+            output_tokens: usage.as_ref().and_then(|item| item.output_tokens),
+        })
     }
 }
 
