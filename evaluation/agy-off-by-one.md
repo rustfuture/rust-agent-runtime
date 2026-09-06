@@ -26,6 +26,10 @@ The unchanged fixture failed its only test. For `[10]`, `last_index` returned `S
 
 This is one deliberately small fixture and does not establish a general success rate. Failed tasks must be included before a broader success-rate claim is made.
 
+## Bounded-budget failure case
+
+The same unchanged fixture was run in a fresh copy with `MAX_STEPS=1`. The run exited non-zero with `TimedOut: agent step limit reached` before it could produce a verified patch. This is recorded as a failed task, not hidden as a tool error. The resulting current evaluation set is therefore 1 completed / 2 total (50%); it is a deliberately tiny smoke set and not a portfolio-wide success claim.
+
 ## Reproduction
 
 Copy only `Cargo.toml`, `Cargo.lock`, and `src/lib.rs` from the fixture into a fresh directory, then run:

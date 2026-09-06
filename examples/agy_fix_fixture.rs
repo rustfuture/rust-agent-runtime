@@ -29,14 +29,27 @@ fn main() -> io::Result<()> {
         let _ = Isolation::None;
         executor
     };
-    let agent = AgentLoop::new(8, vec!["cargo".to_owned()], 16 * 1024)?;
-    let report = agent.run(
+    let max_steps = env::var("MAX_STEPS")
+        .unwrap_or_else(|_| "8".to_owned())
+        .parse()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "MAX_STEPS must be an integer"))?;
+    let agent = AgentLoop::new(max_steps, vec!["cargo".to_owned()], 16 * 1024)?;
+    let report = match agent.run(
         &mut provider,
         &executor,
         Path::new(&fixture),
         "Fix the off-by-one defect in this small Rust crate. Make the smallest correct source change and verify it with cargo test.",
         &CancellationToken::default(),
-    )?;
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            println!("outcome=failed");
+            println!("failure_kind={:?}", error.kind());
+            println!("failure={error}");
+            return Err(error);
+        }
+    };
+    println!("outcome=completed");
     println!("summary={}", report.summary);
     println!("steps={}", report.decisions.len());
     println!("tool_runs={}", report.tool_runs);
