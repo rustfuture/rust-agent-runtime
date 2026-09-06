@@ -10,6 +10,8 @@ pub struct AgentReport {
     pub summary: String,
     pub decisions: Vec<ModelDecision>,
     pub tool_runs: usize,
+    pub changed_files: usize,
+    pub verified_after_change: bool,
 }
 
 pub struct AgentLoop {
@@ -49,6 +51,8 @@ impl AgentLoop {
         let editor = WorkspaceEditor::new(cwd, self.max_observation_bytes)?;
         let mut decisions = Vec::new();
         let mut tool_runs = 0;
+        let mut changed_files = 0;
+        let mut needs_verification = false;
         for _ in 0..self.max_steps {
             if cancellation.is_cancelled() {
                 return Err(io::Error::new(
@@ -65,16 +69,28 @@ impl AgentLoop {
             decisions.push(decision);
             match action {
                 ModelAction::Finish { summary } => {
+                    if needs_verification {
+                        observations.push(
+                            "finish rejected: run a successful verification command after the latest edit"
+                                .to_owned(),
+                        );
+                        continue;
+                    }
                     return Ok(AgentReport {
                         summary,
                         decisions,
                         tool_runs,
+                        changed_files,
+                        verified_after_change: changed_files > 0,
                     });
                 }
                 ModelAction::RunTool { program, args } => {
                     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
                     let execution = executor.run_cancellable(cwd, &program, &refs, cancellation)?;
                     tool_runs += 1;
+                    if execution.status == Some(0) && !execution.timed_out && !execution.cancelled {
+                        needs_verification = false;
+                    }
                     let observation = format!(
                         "program={program} status={:?} timeout={} cancelled={} stdout={} stderr={}",
                         execution.status,
@@ -98,6 +114,8 @@ impl AgentLoop {
                     replacement,
                 } => {
                     editor.replace_once(&path, &expected, &replacement)?;
+                    changed_files += 1;
+                    needs_verification = true;
                     observations.push(format!("replaced exact text in file={path}"));
                 }
             }
@@ -172,6 +190,7 @@ mod tests {
             .unwrap();
         assert_eq!(report.summary, "verified");
         assert_eq!(report.tool_runs, 1);
+        assert_eq!(report.changed_files, 0);
     }
 
     #[test]
@@ -230,7 +249,7 @@ mod tests {
         fs::write(root.join("bug.txt"), "bad\n").unwrap();
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(3, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(4, vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::ReadFile {
                 path: "bug.txt".to_owned(),
@@ -240,11 +259,15 @@ mod tests {
                 expected: "bad".to_owned(),
                 replacement: "good".to_owned(),
             },
+            ModelAction::RunTool {
+                program: "true".to_owned(),
+                args: vec![],
+            },
             ModelAction::Finish {
                 summary: "fixed".to_owned(),
             },
         ]));
-        agent
+        let report = agent
             .run(
                 &mut provider,
                 &executor,
@@ -254,5 +277,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read_to_string(root.join("bug.txt")).unwrap(), "good\n");
+        assert!(report.verified_after_change);
+    }
+
+    #[test]
+    fn rejects_finish_after_unverified_edit() {
+        let root = workspace("unverified");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(2, vec!["true".to_owned()], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Finish {
+                summary: "untested".to_owned(),
+            },
+        ]));
+        assert_eq!(
+            agent
+                .run(
+                    &mut provider,
+                    &executor,
+                    &root,
+                    "fix",
+                    &CancellationToken::default()
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
     }
 }

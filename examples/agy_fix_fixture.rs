@@ -40,6 +40,8 @@ fn main() -> io::Result<()> {
     println!("summary={}", report.summary);
     println!("steps={}", report.decisions.len());
     println!("tool_runs={}", report.tool_runs);
+    println!("changed_files={}", report.changed_files);
+    println!("verified_after_change={}", report.verified_after_change);
     println!(
         "total_input_tokens={}",
         report
