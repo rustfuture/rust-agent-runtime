@@ -1,6 +1,6 @@
 pub mod executor;
 
-use executor::{Execution, Executor};
+use executor::{CancellationToken, Execution, Executor};
 
 use std::{
     collections::HashMap,
@@ -109,12 +109,27 @@ impl Runtime {
         program: &str,
         args: &[&str],
     ) -> io::Result<Option<(String, Execution)>> {
+        self.run_next_cancellable(executor, cwd, program, args, &CancellationToken::default())
+    }
+
+    pub fn run_next_cancellable(
+        &mut self,
+        executor: &Executor,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        cancellation: &CancellationToken,
+    ) -> io::Result<Option<(String, Execution)>> {
         let Some(id) = self.next_queued().map(|task| task.id.clone()) else {
             return Ok(None);
         };
         self.start(&id)?;
-        match executor.run(cwd, program, args) {
+        match executor.run_cancellable(cwd, program, args, cancellation) {
             Ok(execution) => {
+                if execution.cancelled {
+                    self.cancel(&id)?;
+                    return Ok(Some((id, execution)));
+                }
                 let success = execution.status == Some(0) && !execution.timed_out;
                 self.complete(&id, success)?;
                 Ok(Some((id, execution)))
@@ -270,5 +285,30 @@ mod tests {
         let rt = Runtime::open(&dir).unwrap();
         assert_eq!(rt.task("work-1").unwrap().state, State::Succeeded);
         assert!(rt.next_queued().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_persists_cancellation() {
+        let dir = temp();
+        let workspace = dir.join("cancel-workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let executor = Executor::new(
+            &workspace,
+            ["sleep".to_owned()],
+            std::time::Duration::from_secs(2),
+            1024,
+        )
+        .unwrap();
+        let token = CancellationToken::default();
+        token.cancel();
+        let mut rt = Runtime::open(&dir).unwrap();
+        rt.enqueue("cancel-work").unwrap();
+        let (_, execution) = rt
+            .run_next_cancellable(&executor, &workspace, "sleep", &["1"], &token)
+            .unwrap()
+            .unwrap();
+        assert!(execution.cancelled);
+        assert_eq!(rt.task("cancel-work").unwrap().state, State::Cancelled);
     }
 }
