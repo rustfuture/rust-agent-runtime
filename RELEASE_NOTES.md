@@ -16,5 +16,6 @@
 - Opt-in macOS Seatbelt execution that denies network and writes outside the workspace, covered by a real subprocess test.
 - Terminal enqueue/cancel/status/watch interface with non-mutating observation and stricter terminal-state transitions.
 - Real AGY NDJSON response streaming with callback delivery and final usage metadata.
+- Post-edit verification debt that prevents an untested model edit from being reported complete.
 
 No Linux isolation backend, process-tree containment, graphical UI, or automatic merge is included in this candidate. Exactly-once external side effects are not guaranteed if the process dies before a trace is synced; adapters must supply idempotency or transactions. Live AGY calls are not part of CI.
