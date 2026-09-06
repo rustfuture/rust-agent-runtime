@@ -50,6 +50,14 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn open(data_dir: &Path) -> io::Result<Self> {
+        Self::load(data_dir, true)
+    }
+
+    pub fn inspect(data_dir: &Path) -> io::Result<Self> {
+        Self::load(data_dir, false)
+    }
+
+    fn load(data_dir: &Path, recover_interrupted: bool) -> io::Result<Self> {
         fs::create_dir_all(data_dir)?;
         let log = data_dir.join("events.log");
         let mut runtime = Self {
@@ -62,24 +70,26 @@ impl Runtime {
                 runtime.apply_line(line);
             }
         }
-        let interrupted: Vec<String> = runtime
-            .tasks
-            .values()
-            .filter(|task| task.state == State::Running)
-            .map(|task| task.id.clone())
-            .collect();
-        for id in interrupted {
-            let task_attempt = runtime.tasks[&id].attempts;
-            let completed = runtime
-                .traces
-                .get(&id)
-                .and_then(|traces| traces.last())
-                .filter(|trace| trace.attempt == task_attempt)
-                .map(trace_state);
-            if let Some(state) = completed {
-                runtime.transition(&id, state, "restart_trace_recovery")?;
-            } else {
-                runtime.transition(&id, State::Queued, "restart_recovery")?;
+        if recover_interrupted {
+            let interrupted: Vec<String> = runtime
+                .tasks
+                .values()
+                .filter(|task| task.state == State::Running)
+                .map(|task| task.id.clone())
+                .collect();
+            for id in interrupted {
+                let task_attempt = runtime.tasks[&id].attempts;
+                let completed = runtime
+                    .traces
+                    .get(&id)
+                    .and_then(|traces| traces.last())
+                    .filter(|trace| trace.attempt == task_attempt)
+                    .map(trace_state);
+                if let Some(state) = completed {
+                    runtime.transition(&id, state, "restart_trace_recovery")?;
+                } else {
+                    runtime.transition(&id, State::Queued, "restart_recovery")?;
+                }
             }
         }
         Ok(runtime)
@@ -108,6 +118,18 @@ impl Runtime {
     }
 
     pub fn complete(&mut self, id: &str, success: bool) -> io::Result<()> {
+        if self
+            .tasks
+            .get(id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "task not found"))?
+            .state
+            != State::Running
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "task is not running",
+            ));
+        }
         self.transition(
             id,
             if success {
@@ -119,10 +141,28 @@ impl Runtime {
         )
     }
     pub fn cancel(&mut self, id: &str) -> io::Result<()> {
-        self.transition(id, State::Cancelled, "cancel")
+        let state = self
+            .tasks
+            .get(id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "task not found"))?
+            .state;
+        match state {
+            State::Queued | State::Running => self.transition(id, State::Cancelled, "cancel"),
+            State::Cancelled => Ok(()),
+            State::Succeeded | State::Failed => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "terminal task cannot be cancelled",
+            )),
+        }
     }
     pub fn task(&self, id: &str) -> Option<&Task> {
         self.tasks.get(id)
+    }
+
+    pub fn tasks(&self) -> Vec<&Task> {
+        let mut tasks: Vec<_> = self.tasks.values().collect();
+        tasks.sort_by(|left, right| left.id.cmp(&right.id));
+        tasks
     }
 
     pub fn execution_traces(&self, id: &str) -> &[ExecutionTrace] {
@@ -423,6 +463,38 @@ mod tests {
         }
         let rt = Runtime::open(&dir).unwrap();
         assert_eq!(rt.task("c").unwrap().state, State::Cancelled);
+    }
+
+    #[test]
+    fn inspection_does_not_recover_or_mutate_running_task() {
+        let dir = temp();
+        {
+            let mut rt = Runtime::open(&dir).unwrap();
+            rt.enqueue("observed").unwrap();
+            rt.start("observed").unwrap();
+        }
+        let inspected = Runtime::inspect(&dir).unwrap();
+        assert_eq!(inspected.task("observed").unwrap().state, State::Running);
+        assert_eq!(
+            fs::read_to_string(dir.join("events.log"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn terminal_task_cannot_be_cancelled() {
+        let dir = temp();
+        let mut rt = Runtime::open(&dir).unwrap();
+        rt.enqueue("done").unwrap();
+        rt.start("done").unwrap();
+        rt.complete("done", true).unwrap();
+        assert_eq!(
+            rt.cancel("done").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     #[cfg(unix)]

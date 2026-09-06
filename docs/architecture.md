@@ -21,6 +21,8 @@ Workspace reads and edits accept only plain relative paths whose canonical targe
 
 On macOS, the executor can additionally wrap a command in an opt-in Seatbelt profile through `/usr/bin/sandbox-exec`. That profile denies network operations and filesystem writes outside the canonical workspace. This is verified with a real subprocess test. The default remains `Isolation::None` for portability, and no Linux isolation backend is claimed.
 
+The CLI provides enqueue/cancel commands plus one-shot and refreshing status views. Status uses `Runtime::inspect`, which replays state without performing restart recovery. Only a worker opening the runtime through `Runtime::open` reconciles an interrupted task. Terminal states cannot be cancelled or completed again through the public transition methods.
+
 ## Security boundary
 
 Without the opt-in macOS backend, this is not an OS sandbox. Even with it, environment-variable secrecy, descendant lifecycle containment, CPU/memory usage, and all platform-specific privilege boundaries are not solved. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.
