@@ -32,11 +32,11 @@ stream_dir=$(mktemp -d)
 AGY_BIN=/path/to/agy AGY_WORK_DIR="$stream_dir" cargo run --locked --example agy_stream_smoke
 ```
 
-The first end-to-end fixture evaluation starts from a failing Rust test, gives the model only bounded file read/exact replacement and allowlisted `cargo` execution, and verifies the resulting patch in a fresh copy. See [`evaluation/agy-off-by-one.md`](evaluation/agy-off-by-one.md) for the patch, test outcome, latency, token usage, and limitations.
+The end-to-end fixture evaluation suite tests the runtime against failing Rust tests across multiple defect families, giving the model only bounded file read/exact replacement and allowlisted `cargo` execution. See [`evaluation/fixture-evaluation-report.md`](evaluation/fixture-evaluation-report.md) for the multi-fixture matrix (covering `off_by_one`, `clamp_range`, and `prefix_format`), patch diffs, latency, token usage, and limitation analysis.
 
 After any edit, the agent loop rejects a model-declared finish until a later command succeeds. The report separately exposes changed-file count and whether a post-change command passed. Project-specific evaluation still independently reruns the intended test; a successful unrelated command is not treated as semantic correctness.
 
-The fixture report includes both the successful run and a deliberately under-budget `MAX_STEPS=1` failure. That failure is counted in the tiny smoke-set denominator (1 completed / 2 total, 50%), while explicitly not being generalized into an overall agent success rate.
+The multi-fixture evaluation includes successful repairs (2/4), a budget-limited failure (1/4), and an unresolved premature exit (1/4), giving a 50.0% completion rate on the synthetic suite. This metric is documented truthfully as a bounded suite measurement rather than a generalized autonomy claim.
 
 On macOS, callers can opt into `Isolation::MacOsSandbox`. The generated Seatbelt profile denies network access and denies writes outside the canonical workspace; a platform-gated test executes a real shell and proves both the denied outside write and an allowed inside write. This backend depends on the currently installed `/usr/bin/sandbox-exec`. No equivalent Linux backend is implemented yet, so the same isolation claim is not made there.
 

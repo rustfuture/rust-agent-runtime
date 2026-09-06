@@ -10,16 +10,20 @@ fn main() -> io::Result<()> {
     let provider_dir = env::var("AGY_WORK_DIR").unwrap_or_else(|_| ".".to_owned());
     let fixture = env::var("FIXTURE_DIR")
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "FIXTURE_DIR is required"))?;
+    let timeout_secs = env::var("TIMEOUT_SECS")
+        .unwrap_or_else(|_| "60".to_owned())
+        .parse()
+        .unwrap_or(60);
     let mut provider = AgyProvider::new(
         Path::new(&binary),
         Path::new(&provider_dir),
         "gemini-3.8-flash-low",
-        Duration::from_secs(30),
+        Duration::from_secs(timeout_secs),
     )?;
     let executor = Executor::new(
         Path::new(&fixture),
         ["cargo".to_owned()],
-        Duration::from_secs(30),
+        Duration::from_secs(timeout_secs),
         16 * 1024,
     )?;
     #[cfg(target_os = "macos")]
@@ -34,11 +38,14 @@ fn main() -> io::Result<()> {
         .parse()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "MAX_STEPS must be an integer"))?;
     let agent = AgentLoop::new(max_steps, vec!["cargo".to_owned()], 16 * 1024)?;
+    let task = env::var("TASK").unwrap_or_else(|_| {
+        "Fix the off-by-one defect in this small Rust crate. Make the smallest correct source change and verify it with cargo test.".to_owned()
+    });
     let report = match agent.run(
         &mut provider,
         &executor,
         Path::new(&fixture),
-        "Fix the off-by-one defect in this small Rust crate. Make the smallest correct source change and verify it with cargo test.",
+        &task,
         &CancellationToken::default(),
     ) {
         Ok(report) => report,
@@ -55,6 +62,9 @@ fn main() -> io::Result<()> {
     println!("tool_runs={}", report.tool_runs);
     println!("changed_files={}", report.changed_files);
     println!("verified_after_change={}", report.verified_after_change);
+    for (i, d) in report.decisions.iter().enumerate() {
+        println!("decision[{}]={:?}", i, d.action);
+    }
     println!(
         "total_input_tokens={}",
         report

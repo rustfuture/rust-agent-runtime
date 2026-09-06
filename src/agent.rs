@@ -101,23 +101,31 @@ impl AgentLoop {
                     );
                     observations.push(truncate(observation, self.max_observation_bytes));
                 }
-                ModelAction::ReadFile { path } => {
-                    let content = editor.read(&path)?;
-                    observations.push(truncate(
-                        format!("file={path}\n{content}"),
-                        self.max_observation_bytes,
-                    ));
-                }
+                ModelAction::ReadFile { path } => match editor.read(&path) {
+                    Ok(content) => {
+                        observations.push(truncate(
+                            format!("file={path}\n{content}"),
+                            self.max_observation_bytes,
+                        ));
+                    }
+                    Err(error) => {
+                        observations.push(format!("read_file failed for file={path}: {error}"));
+                    }
+                },
                 ModelAction::ReplaceText {
                     path,
                     expected,
                     replacement,
-                } => {
-                    editor.replace_once(&path, &expected, &replacement)?;
-                    changed_files += 1;
-                    needs_verification = true;
-                    observations.push(format!("replaced exact text in file={path}"));
-                }
+                } => match editor.replace_once(&path, &expected, &replacement) {
+                    Ok(()) => {
+                        changed_files += 1;
+                        needs_verification = true;
+                        observations.push(format!("replaced exact text in file={path}"));
+                    }
+                    Err(error) => {
+                        observations.push(format!("replace_text failed in file={path}: {error}"));
+                    }
+                },
             }
         }
         Err(io::Error::new(
