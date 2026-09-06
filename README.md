@@ -36,6 +36,8 @@ The first end-to-end fixture evaluation starts from a failing Rust test, gives t
 
 After any edit, the agent loop rejects a model-declared finish until a later command succeeds. The report separately exposes changed-file count and whether a post-change command passed. Project-specific evaluation still independently reruns the intended test; a successful unrelated command is not treated as semantic correctness.
 
+The fixture report includes both the successful run and a deliberately under-budget `MAX_STEPS=1` failure. That failure is counted in the tiny smoke-set denominator (1 completed / 2 total, 50%), while explicitly not being generalized into an overall agent success rate.
+
 On macOS, callers can opt into `Isolation::MacOsSandbox`. The generated Seatbelt profile denies network access and denies writes outside the canonical workspace; a platform-gated test executes a real shell and proves both the denied outside write and an allowed inside write. This backend depends on the currently installed `/usr/bin/sandbox-exec`. No equivalent Linux backend is implemented yet, so the same isolation claim is not made there.
 
 The included terminal dashboard exposes durable task state and the latest tool/duration without modifying worker state:

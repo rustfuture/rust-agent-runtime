@@ -208,7 +208,13 @@ impl ModelProvider for AgyProvider {
                 envelope.status
             )));
         }
-        let action = serde_json::from_value(envelope.structured_output)
+        let structured_output = envelope.structured_output.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "AGY success response did not include structured_output",
+            )
+        })?;
+        let action = serde_json::from_value(structured_output)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         Ok(ModelDecision {
             action,
@@ -246,7 +252,7 @@ impl Serialize for DecisionRequest {
 #[derive(Deserialize)]
 struct AgyEnvelope {
     status: String,
-    structured_output: serde_json::Value,
+    structured_output: Option<serde_json::Value>,
     usage: Option<AgyUsage>,
 }
 
