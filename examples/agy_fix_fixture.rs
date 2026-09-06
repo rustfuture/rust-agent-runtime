@@ -37,7 +37,7 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|_| "8".to_owned())
         .parse()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "MAX_STEPS must be an integer"))?;
-    let agent = AgentLoop::new(max_steps, vec!["cargo".to_owned()], 16 * 1024)?;
+    let agent = AgentLoop::new(max_steps, vec!["cargo".to_owned()], vec!["cargo".to_owned()], 16 * 1024)?;
     let task = env::var("TASK").unwrap_or_else(|_| {
         "Fix the off-by-one defect in this small Rust crate. Make the smallest correct source change and verify it with cargo test.".to_owned()
     });

@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    fs::{self, File},
     io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -9,7 +8,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -106,21 +105,8 @@ impl Executor {
                 "working directory escapes workspace",
             ));
         }
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let sequence = NEXT_EXECUTION.fetch_add(1, Ordering::Relaxed);
-        let stdout_path = std::env::temp_dir().join(format!(
-            "agent-runtime-{}-{nonce}-{sequence}.stdout",
-            std::process::id()
-        ));
-        let stderr_path = std::env::temp_dir().join(format!(
-            "agent-runtime-{}-{nonce}-{sequence}.stderr",
-            std::process::id()
-        ));
-        let stdout_file = File::create(&stdout_path)?;
-        let stderr_file = File::create(&stderr_path)?;
+
+
         let started = Instant::now();
         let mut command = match self.isolation {
             Isolation::None => {
@@ -147,9 +133,59 @@ impl Executor {
         let mut child = command
             .current_dir(&cwd)
             .stdin(Stdio::null())
-            .stdout(stdout_file)
-            .stderr(stderr_file)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()?;
+        let mut stdout_handle = child.stdout.take().unwrap();
+        let mut stderr_handle = child.stderr.take().unwrap();
+        
+        let max_bytes = self.max_output_bytes as u64;
+        let stdout_thread = thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let mut chunk = vec![0; 4096];
+            let mut truncated = false;
+            while buffer.len() < max_bytes as usize {
+                let to_read = std::cmp::min(4096, max_bytes as usize - buffer.len());
+                match stdout_handle.read(&mut chunk[..to_read]) {
+                    Ok(0) => break,
+                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                    Err(_) => break,
+                }
+            }
+            // Check if there's more available without blocking? 
+            // Actually, if we just drop stdout_handle, the child gets SIGPIPE.
+            // But let's check if it's truncated by reading one more byte.
+            if buffer.len() == max_bytes as usize {
+                let mut tiny = [0; 1];
+                if let Ok(1) = stdout_handle.read(&mut tiny) {
+                    truncated = true;
+                }
+            }
+            drop(stdout_handle);
+            (String::from_utf8_lossy(&buffer).into_owned(), truncated)
+        });
+
+        let stderr_thread = thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let mut chunk = vec![0; 4096];
+            let mut truncated = false;
+            while buffer.len() < max_bytes as usize {
+                let to_read = std::cmp::min(4096, max_bytes as usize - buffer.len());
+                match stderr_handle.read(&mut chunk[..to_read]) {
+                    Ok(0) => break,
+                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                    Err(_) => break,
+                }
+            }
+            if buffer.len() == max_bytes as usize {
+                let mut tiny = [0; 1];
+                if let Ok(1) = stderr_handle.read(&mut tiny) {
+                    truncated = true;
+                }
+            }
+            drop(stderr_handle);
+            (String::from_utf8_lossy(&buffer).into_owned(), truncated)
+        });
         let mut timed_out = false;
         let mut cancelled = false;
         let status = loop {
@@ -168,10 +204,8 @@ impl Executor {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        let (stdout, stdout_truncated) = read_limited(&stdout_path, self.max_output_bytes)?;
-        let (stderr, stderr_truncated) = read_limited(&stderr_path, self.max_output_bytes)?;
-        let _ = fs::remove_file(stdout_path);
-        let _ = fs::remove_file(stderr_path);
+        let (stdout, stdout_truncated) = stdout_thread.join().unwrap();
+        let (stderr, stderr_truncated) = stderr_thread.join().unwrap();
         Ok(Execution {
             status,
             timed_out,
@@ -212,13 +246,7 @@ fn macos_profile(workspace: &Path) -> String {
     )
 }
 
-fn read_limited(path: &Path, limit: usize) -> io::Result<(String, bool)> {
-    let file = File::open(path)?;
-    let length = file.metadata()?.len() as usize;
-    let mut bytes = Vec::new();
-    file.take(limit as u64).read_to_end(&mut bytes)?;
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), length > limit))
-}
+
 
 #[cfg(all(test, unix))]
 mod tests {
