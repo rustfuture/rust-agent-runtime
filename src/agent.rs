@@ -96,10 +96,15 @@ impl AgentLoop {
                         let is_verification = if self.verification_programs.is_empty() {
                             true
                         } else {
-                            let full_cmd = if args.is_empty() { program.clone() } else { format!("{} {}", program, args[0]) };
-                            self.verification_programs.contains(&program) || self.verification_programs.contains(&full_cmd)
+                            let full_cmd = if args.is_empty() {
+                                program.clone()
+                            } else {
+                                format!("{} {}", program, args[0])
+                            };
+                            self.verification_programs.contains(&program)
+                                || self.verification_programs.contains(&full_cmd)
                         };
-                        
+
                         if is_verification {
                             needs_verification = false;
                         } else {
@@ -192,7 +197,8 @@ mod tests {
         let root = workspace("finish");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let agent =
+            AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::RunTool {
                 program: "true".to_owned(),
@@ -221,7 +227,8 @@ mod tests {
         let root = workspace("deny");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let agent =
+            AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([ModelAction::RunTool {
             program: "rm".to_owned(),
             args: vec!["-rf".to_owned(), ".".to_owned()],
@@ -246,7 +253,8 @@ mod tests {
         let root = workspace("limit");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let agent =
+            AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([ModelAction::RunTool {
             program: "true".to_owned(),
             args: vec![],
@@ -272,7 +280,8 @@ mod tests {
         fs::write(root.join("bug.txt"), "bad\n").unwrap();
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(4, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let agent =
+            AgentLoop::new(4, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::ReadFile {
                 path: "bug.txt".to_owned(),
@@ -309,7 +318,8 @@ mod tests {
         fs::write(root.join("bug.txt"), "bad\n").unwrap();
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let agent =
+            AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::ReplaceText {
                 path: "bug.txt".to_owned(),

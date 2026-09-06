@@ -1,5 +1,6 @@
-use std::{fs, 
+use std::{
     collections::HashSet,
+    fs,
     io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -106,7 +107,6 @@ impl Executor {
             ));
         }
 
-
         let started = Instant::now();
         let mut command = match self.isolation {
             Isolation::None => {
@@ -138,7 +138,7 @@ impl Executor {
             .spawn()?;
         let mut stdout_handle = child.stdout.take().unwrap();
         let mut stderr_handle = child.stderr.take().unwrap();
-        
+
         let max_bytes = self.max_output_bytes as u64;
         let stdout_thread = thread::spawn(move || {
             let mut buffer = Vec::new();
@@ -152,7 +152,7 @@ impl Executor {
                     Err(_) => break,
                 }
             }
-            // Check if there's more available without blocking? 
+            // Check if there's more available without blocking?
             // Actually, if we just drop stdout_handle, the child gets SIGPIPE.
             // But let's check if it's truncated by reading one more byte.
             if buffer.len() == max_bytes as usize {
@@ -245,8 +245,6 @@ fn macos_profile(workspace: &Path) -> String {
         "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n(allow file-write* (subpath \"{escaped}\"))"
     )
 }
-
-
 
 #[cfg(all(test, unix))]
 mod tests {
