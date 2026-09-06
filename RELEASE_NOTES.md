@@ -13,5 +13,6 @@
 - Provider-neutral structured decisions and a step-bounded agent loop.
 - AGY/Gemini 3.8 Flash Low adapter with usage/latency metadata and a real smoke example.
 - Bounded workspace read/exact-replacement actions and a real failing-to-passing Rust fixture evaluation.
+- Opt-in macOS Seatbelt execution that denies network and writes outside the workspace, covered by a real subprocess test.
 
-No patch generator, streaming provider, network isolation, process-tree containment, UI, or automatic merge is included in this candidate. Exactly-once external side effects are not guaranteed if the process dies before a trace is synced; adapters must supply idempotency or transactions. Live AGY calls are not part of CI.
+No Linux isolation backend, streaming provider, process-tree containment, UI, or automatic merge is included in this candidate. Exactly-once external side effects are not guaranteed if the process dies before a trace is synced; adapters must supply idempotency or transactions. Live AGY calls are not part of CI.

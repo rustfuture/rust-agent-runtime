@@ -5,12 +5,14 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+static NEXT_EXECUTION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct Execution {
@@ -40,6 +42,14 @@ pub struct Executor {
     allowed: HashSet<String>,
     timeout: Duration,
     max_output_bytes: usize,
+    isolation: Isolation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Isolation {
+    #[default]
+    None,
+    MacOsSandbox,
 }
 
 impl Executor {
@@ -54,7 +64,19 @@ impl Executor {
             allowed: allowed.into_iter().collect(),
             timeout,
             max_output_bytes,
+            isolation: Isolation::None,
         })
+    }
+
+    pub fn with_isolation(mut self, isolation: Isolation) -> io::Result<Self> {
+        if isolation == Isolation::MacOsSandbox && !Path::new("/usr/bin/sandbox-exec").is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "macOS sandbox-exec is unavailable",
+            ));
+        }
+        self.isolation = isolation;
+        Ok(self)
     }
 
     pub fn run(&self, cwd: &Path, program: &str, args: &[&str]) -> io::Result<Execution> {
@@ -85,13 +107,32 @@ impl Executor {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let stdout_path = std::env::temp_dir().join(format!("agent-runtime-{nonce}.stdout"));
-        let stderr_path = std::env::temp_dir().join(format!("agent-runtime-{nonce}.stderr"));
+        let sequence = NEXT_EXECUTION.fetch_add(1, Ordering::Relaxed);
+        let stdout_path = std::env::temp_dir().join(format!(
+            "agent-runtime-{}-{nonce}-{sequence}.stdout",
+            std::process::id()
+        ));
+        let stderr_path = std::env::temp_dir().join(format!(
+            "agent-runtime-{}-{nonce}-{sequence}.stderr",
+            std::process::id()
+        ));
         let stdout_file = File::create(&stdout_path)?;
         let stderr_file = File::create(&stderr_path)?;
         let started = Instant::now();
-        let mut child = Command::new(program)
-            .args(args)
+        let mut command = match self.isolation {
+            Isolation::None => {
+                let mut command = Command::new(program);
+                command.args(args);
+                command
+            }
+            Isolation::MacOsSandbox => {
+                let profile = macos_profile(&self.workspace);
+                let mut command = Command::new("/usr/bin/sandbox-exec");
+                command.args(["-p", &profile, program]).args(args);
+                command
+            }
+        };
+        let mut child = command
             .current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(stdout_file)
@@ -129,6 +170,16 @@ impl Executor {
             duration_ms: started.elapsed().as_millis(),
         })
     }
+}
+
+fn macos_profile(workspace: &Path) -> String {
+    let escaped = workspace
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!(
+        "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n(allow file-write* (subpath \"{escaped}\"))"
+    )
 }
 
 fn read_limited(path: &Path, limit: usize) -> io::Result<(String, bool)> {
@@ -201,5 +252,29 @@ mod tests {
         assert!(result.cancelled);
         assert!(!result.timed_out);
         assert!(result.duration_ms < 1000);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sandbox_denies_writes_outside_workspace() {
+        let root = workspace("macos-sandbox");
+        let outside = std::env::temp_dir().join(format!(
+            "agent-runtime-forbidden-write-{}",
+            std::process::id()
+        ));
+        let executor = Executor::new(&root, ["sh".to_owned()], Duration::from_secs(2), 4096)
+            .unwrap()
+            .with_isolation(Isolation::MacOsSandbox)
+            .unwrap();
+        let script = format!("printf forbidden > {}", outside.display());
+        let result = executor.run(&root, "sh", &["-c", &script]).unwrap();
+        assert_ne!(result.status, Some(0));
+        assert!(!outside.exists());
+
+        let inside = root.join("allowed.txt");
+        let script = format!("printf allowed > {}", inside.display());
+        let result = executor.run(&root, "sh", &["-c", &script]).unwrap();
+        assert_eq!(result.status, Some(0), "{}", result.stderr);
+        assert_eq!(fs::read_to_string(inside).unwrap(), "allowed");
     }
 }
