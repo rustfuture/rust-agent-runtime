@@ -8,4 +8,4 @@ The first milestone intentionally contains no LLM and no arbitrary shell executi
 cargo test --locked
 ```
 
-Next: a bounded process executor with explicit command allowlists, timeouts, output limits, and workspace containment. A temporary directory alone is not treated as a sandbox.
+The bounded executor rejects program paths and non-allowlisted programs, canonicalizes the working directory under the configured workspace, kills timed-out children, disables stdin, and truncates captured stdout/stderr at a configured byte limit. These controls are not an OS sandbox and do not yet isolate network access or child-process trees.
