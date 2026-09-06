@@ -2,7 +2,7 @@
 
 Date: 2026-09-06  
 Model: `gemini-3.8-flash-low`  
-Runtime commit under test: working tree after `9a27cd9`  
+Runtime commit under test: `09a73f17107448d6d0f270d0bbddde6c9e442bba`
 Fixture: `fixtures/off_by_one` copied to a fresh temporary directory
 
 ## Task
