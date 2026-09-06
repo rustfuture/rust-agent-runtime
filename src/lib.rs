@@ -1,4 +1,6 @@
+pub mod agent;
 pub mod executor;
+pub mod provider;
 
 use executor::{CancellationToken, Execution, Executor};
 
