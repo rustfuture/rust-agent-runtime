@@ -17,6 +17,7 @@ pub struct AgentReport {
 pub struct AgentLoop {
     max_steps: usize,
     allowed_programs: Vec<String>,
+    verification_programs: Vec<String>,
     max_observation_bytes: usize,
 }
 
@@ -24,6 +25,7 @@ impl AgentLoop {
     pub fn new(
         max_steps: usize,
         allowed_programs: Vec<String>,
+        verification_programs: Vec<String>,
         max_observation_bytes: usize,
     ) -> io::Result<Self> {
         if max_steps == 0 || max_observation_bytes == 0 {
@@ -35,6 +37,7 @@ impl AgentLoop {
         Ok(Self {
             max_steps,
             allowed_programs,
+            verification_programs,
             max_observation_bytes,
         })
     }
@@ -51,7 +54,7 @@ impl AgentLoop {
         let editor = WorkspaceEditor::new(cwd, self.max_observation_bytes)?;
         let mut decisions = Vec::new();
         let mut tool_runs = 0;
-        let mut changed_files = 0;
+        let mut changed_files = std::collections::HashSet::new();
         let mut needs_verification = false;
         for _ in 0..self.max_steps {
             if cancellation.is_cancelled() {
@@ -80,8 +83,8 @@ impl AgentLoop {
                         summary,
                         decisions,
                         tool_runs,
-                        changed_files,
-                        verified_after_change: changed_files > 0,
+                        changed_files: changed_files.len(),
+                        verified_after_change: !changed_files.is_empty(),
                     });
                 }
                 ModelAction::RunTool { program, args } => {
@@ -89,7 +92,19 @@ impl AgentLoop {
                     let execution = executor.run_cancellable(cwd, &program, &refs, cancellation)?;
                     tool_runs += 1;
                     if execution.status == Some(0) && !execution.timed_out && !execution.cancelled {
-                        needs_verification = false;
+                        // Only clear the needs_verification flag if the program is a valid verification tool
+                        let is_verification = if self.verification_programs.is_empty() {
+                            true
+                        } else {
+                            let full_cmd = if args.is_empty() { program.clone() } else { format!("{} {}", program, args[0]) };
+                            self.verification_programs.contains(&program) || self.verification_programs.contains(&full_cmd)
+                        };
+                        
+                        if is_verification {
+                            needs_verification = false;
+                        } else {
+                            observations.push("Note: This command succeeded but is not considered a formal verification of the task. Please run tests or builds.".to_string());
+                        }
                     }
                     let observation = format!(
                         "program={program} status={:?} timeout={} cancelled={} stdout={} stderr={}",
@@ -118,7 +133,7 @@ impl AgentLoop {
                     replacement,
                 } => match editor.replace_once(&path, &expected, &replacement) {
                     Ok(()) => {
-                        changed_files += 1;
+                        changed_files.insert(path.clone());
                         needs_verification = true;
                         observations.push(format!("replaced exact text in file={path}"));
                     }
@@ -177,7 +192,7 @@ mod tests {
         let root = workspace("finish");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(2, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::RunTool {
                 program: "true".to_owned(),
@@ -206,7 +221,7 @@ mod tests {
         let root = workspace("deny");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(1, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([ModelAction::RunTool {
             program: "rm".to_owned(),
             args: vec!["-rf".to_owned(), ".".to_owned()],
@@ -231,7 +246,7 @@ mod tests {
         let root = workspace("limit");
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(1, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(1, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([ModelAction::RunTool {
             program: "true".to_owned(),
             args: vec![],
@@ -257,7 +272,7 @@ mod tests {
         fs::write(root.join("bug.txt"), "bad\n").unwrap();
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(4, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(4, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::ReadFile {
                 path: "bug.txt".to_owned(),
@@ -294,7 +309,7 @@ mod tests {
         fs::write(root.join("bug.txt"), "bad\n").unwrap();
         let executor =
             Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
-        let agent = AgentLoop::new(2, vec!["true".to_owned()], 1024).unwrap();
+        let agent = AgentLoop::new(2, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
         let mut provider = FakeProvider(VecDeque::from([
             ModelAction::ReplaceText {
                 path: "bug.txt".to_owned(),
