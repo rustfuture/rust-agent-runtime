@@ -4,6 +4,10 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -12,10 +16,23 @@ use std::{
 pub struct Execution {
     pub status: Option<i32>,
     pub timed_out: bool,
+    pub cancelled: bool,
     pub stdout: String,
     pub stderr: String,
     pub output_truncated: bool,
     pub duration_ms: u128,
+}
+
+#[derive(Clone, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+
+impl CancellationToken {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 pub struct Executor {
@@ -41,6 +58,16 @@ impl Executor {
     }
 
     pub fn run(&self, cwd: &Path, program: &str, args: &[&str]) -> io::Result<Execution> {
+        self.run_cancellable(cwd, program, args, &CancellationToken::default())
+    }
+
+    pub fn run_cancellable(
+        &self,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        cancellation: &CancellationToken,
+    ) -> io::Result<Execution> {
         if program.contains('/') || !self.allowed.contains(program) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -71,9 +98,15 @@ impl Executor {
             .stderr(stderr_file)
             .spawn()?;
         let mut timed_out = false;
+        let mut cancelled = false;
         let status = loop {
             if let Some(status) = child.try_wait()? {
                 break status.code();
+            }
+            if cancellation.is_cancelled() {
+                cancelled = true;
+                child.kill()?;
+                break child.wait()?.code();
             }
             if started.elapsed() >= self.timeout {
                 timed_out = true;
@@ -89,6 +122,7 @@ impl Executor {
         Ok(Execution {
             status,
             timed_out,
+            cancelled,
             stdout,
             stderr,
             output_truncated: stdout_truncated || stderr_truncated,
@@ -147,5 +181,25 @@ mod tests {
         let output = executor.run(&root, "printf", &["1234567890"]).unwrap();
         assert_eq!(output.stdout, "12345");
         assert!(output.output_truncated);
+    }
+
+    #[test]
+    fn cancellation_kills_running_process() {
+        let root = workspace("cancel");
+        let executor =
+            Executor::new(&root, ["sleep".to_owned()], Duration::from_secs(5), 1024).unwrap();
+        let token = CancellationToken::default();
+        let trigger = token.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            trigger.cancel();
+        });
+        let result = executor
+            .run_cancellable(&root, "sleep", &["2"], &token)
+            .unwrap();
+        thread.join().unwrap();
+        assert!(result.cancelled);
+        assert!(!result.timed_out);
+        assert!(result.duration_ms < 1000);
     }
 }
