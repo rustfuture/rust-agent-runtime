@@ -96,13 +96,12 @@ impl AgentLoop {
                         let is_verification = if self.verification_programs.is_empty() {
                             true
                         } else {
-                            let full_cmd = if args.is_empty() {
-                                program.clone()
-                            } else {
-                                format!("{} {}", program, args[0])
-                            };
-                            self.verification_programs.contains(&program)
-                                || self.verification_programs.contains(&full_cmd)
+                            let mut full_cmd = program.clone();
+                            if !args.is_empty() {
+                                full_cmd.push(' ');
+                                full_cmd.push_str(&args.join(" "));
+                            }
+                            self.verification_programs.contains(&full_cmd)
                         };
 
                         if is_verification {
