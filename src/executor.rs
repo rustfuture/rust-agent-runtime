@@ -12,6 +12,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 static NEXT_EXECUTION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
@@ -132,6 +135,15 @@ impl Executor {
                 command
             }
         };
+        #[cfg(unix)]
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
         let mut child = command
             .current_dir(&cwd)
             .stdin(Stdio::null())
@@ -146,12 +158,12 @@ impl Executor {
             }
             if cancellation.is_cancelled() {
                 cancelled = true;
-                child.kill()?;
+                terminate_child(&mut child)?;
                 break child.wait()?.code();
             }
             if started.elapsed() >= self.timeout {
                 timed_out = true;
-                child.kill()?;
+                terminate_child(&mut child)?;
                 break child.wait()?.code();
             }
             thread::sleep(Duration::from_millis(10));
@@ -170,6 +182,24 @@ impl Executor {
             duration_ms: started.elapsed().as_millis(),
         })
     }
+}
+
+fn terminate_child(child: &mut std::process::Child) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        // The child creates its own process group in pre_exec; a negative pid
+        // terminates the direct child and descendants without touching the worker.
+        let result = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+        if result == -1 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::NotFound {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    child.kill()
 }
 
 fn macos_profile(workspace: &Path) -> String {
@@ -252,6 +282,20 @@ mod tests {
         assert!(result.cancelled);
         assert!(!result.timed_out);
         assert!(result.duration_ms < 1000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_terminates_descendant_process_group() {
+        let root = workspace("process-group");
+        let marker = root.join("descendant-marker");
+        let executor =
+            Executor::new(&root, ["sh".to_owned()], Duration::from_millis(50), 1024).unwrap();
+        let script = format!("sleep 1; touch {}", marker.display());
+        let result = executor.run(&root, "sh", &["-c", &script]).unwrap();
+        assert!(result.timed_out);
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!marker.exists());
     }
 
     #[cfg(target_os = "macos")]

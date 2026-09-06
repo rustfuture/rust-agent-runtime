@@ -13,7 +13,7 @@ The runtime reconstructs task state and execution metadata by replaying an appen
 
 Retries are explicit, apply only to failed tasks, and stop at a caller-supplied maximum attempt count. The runtime does not infer that an arbitrary command is idempotent. The durable trace stores metadata, not argument values or command output, to reduce accidental secret retention.
 
-The executor accepts only a configured program name allowlist, rejects program paths, canonicalizes the working directory under a fixed workspace, closes stdin, captures bounded output through temporary files, and polls for timeout or cancellation.
+The executor accepts only a configured program name allowlist, rejects program paths, canonicalizes the working directory under a fixed workspace, closes stdin, captures bounded output through temporary files, and polls for timeout or cancellation. On Unix, it starts each direct child in a new process group and terminates that group on timeout/cancellation; a real shell-descendant test covers this behavior.
 
 The agent loop asks a `ModelProvider` for one structured action at a time and stops at a fixed step count. Tool output is truncated before it becomes the next model observation. The AGY adapter runs as an operator-configured provider boundary in plan/sandbox mode and parses only its structured output. A requested tool does not run through AGY: it returns to the Rust executor and is independently authorized there.
 
@@ -29,4 +29,4 @@ The CLI provides enqueue/cancel commands plus one-shot and refreshing status vie
 
 ## Security boundary
 
-Without the opt-in macOS backend, this is not an OS sandbox. Even with it, environment-variable secrecy, descendant lifecycle containment, CPU/memory usage, and all platform-specific privilege boundaries are not solved. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.
+Without the opt-in macOS backend, this is not an OS sandbox. Even with it, environment-variable secrecy, CPU/memory usage, and all platform-specific privilege boundaries are not solved. Unix descendant termination is covered, but commands can still create side effects before a timeout. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.
