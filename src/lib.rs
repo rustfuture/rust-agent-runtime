@@ -1,3 +1,5 @@
+pub mod executor;
+
 use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
