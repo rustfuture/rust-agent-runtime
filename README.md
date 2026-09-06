@@ -16,4 +16,13 @@ A clonable cancellation token is checked while a child runs. Cancellation kills 
 
 Each completed command also appends a durable execution trace containing its attempt, program name, argument count, exit status, timeout/cancellation flags, bounded-output sizes, truncation flag, and duration. Argument values and captured output are deliberately not written to the event log. On restart, a matching completed trace is reconciled to its terminal state instead of repeating that command. Failed tasks can be explicitly requeued with `Runtime::retry(id, max_attempts)`; retries are never automatic, because callers must decide whether an operation is safe to repeat.
 
+The next layer exposes a model-provider trait, a structured AGY provider, and a step-bounded agent loop. The provider uses `gemini-3.8-flash-low` in the included smoke example, records reported token usage and latency, and requests schema-constrained actions in plan/sandbox mode. Model-requested tools still pass through the executor, so model or repository text cannot add a program to the allowlist.
+
+```bash
+smoke_dir=$(mktemp -d)
+AGY_BIN=/path/to/agy AGY_WORK_DIR="$smoke_dir" cargo run --locked --example agy_smoke
+```
+
+The real smoke call on 2026-09-06 returned the required structured `finish` action in 8.522 seconds. AGY reported 35,067 input and 47 output tokens; the unexpectedly high fixed context overhead is why live model calls are kept out of normal CI and used only at explicit evaluation milestones.
+
 See `docs/architecture.md` for the trust boundary and `RELEASE_NOTES.md` for the current candidate scope. Licensed under MIT.
