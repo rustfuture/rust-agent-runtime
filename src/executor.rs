@@ -1,11 +1,10 @@
 use std::{
     collections::HashSet,
-    fs,
     io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     thread,
@@ -14,8 +13,6 @@ use std::{
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-
-static NEXT_EXECUTION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct Execution {
@@ -249,6 +246,7 @@ fn macos_profile(workspace: &Path) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::fs;
     fn workspace(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("executor-{}-{name}", std::process::id()));
         fs::create_dir_all(&path).unwrap();

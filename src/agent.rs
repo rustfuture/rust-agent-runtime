@@ -42,6 +42,13 @@ impl AgentLoop {
         })
     }
 
+    fn is_verification_command(&self, program: &str, args: &[String]) -> bool {
+        self.verification_programs.iter().any(|allowed| {
+            let mut parts = allowed.split_whitespace();
+            parts.next() == Some(program) && parts.eq(args.iter().map(String::as_str))
+        })
+    }
+
     pub fn run(
         &self,
         provider: &mut impl ModelProvider,
@@ -93,19 +100,7 @@ impl AgentLoop {
                     tool_runs += 1;
                     if execution.status == Some(0) && !execution.timed_out && !execution.cancelled {
                         // Only clear the needs_verification flag if the program is a valid verification tool
-                        let is_verification = if self.verification_programs.is_empty() {
-                            true
-                        } else {
-                            self.verification_programs.iter().any(|allowed| {
-                                let mut parts = allowed.split_whitespace();
-                                let allowed_prog = parts.next().unwrap_or("");
-                                let allowed_args: Vec<&str> = parts.collect();
-
-                                allowed_prog == program
-                                    && allowed_args
-                                        == args.iter().map(String::as_str).collect::<Vec<&str>>()
-                            })
-                        };
+                        let is_verification = self.is_verification_command(&program, &args);
 
                         if is_verification {
                             needs_verification = false;
@@ -222,6 +217,58 @@ mod tests {
         assert_eq!(report.summary, "verified");
         assert_eq!(report.tool_runs, 1);
         assert_eq!(report.changed_files, 0);
+    }
+
+    #[test]
+    fn verification_matches_exact_arguments_and_defaults_to_deny() {
+        let agent =
+            AgentLoop::new(3, vec!["cargo".into()], vec!["cargo test".into()], 1024).unwrap();
+        assert!(agent.is_verification_command("cargo", &["test".into()]));
+        for args in [
+            vec![],
+            vec!["--version".into()],
+            vec!["test".into(), "--help".into()],
+            vec!["test --help".into()],
+        ] {
+            assert!(!agent.is_verification_command("cargo", &args));
+        }
+        let empty = AgentLoop::new(3, vec!["true".into()], vec![], 1024).unwrap();
+        assert!(!empty.is_verification_command("true", &[]));
+    }
+
+    #[test]
+    fn successful_unapproved_command_cannot_verify_an_edit() {
+        let root = workspace("unapproved-success");
+        fs::write(root.join("bug.txt"), "bad").unwrap();
+        let executor = Executor::new(&root, ["true".into()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(3, vec!["true".into()], vec![], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".into(),
+                expected: "bad".into(),
+                replacement: "good".into(),
+            },
+            ModelAction::RunTool {
+                program: "true".into(),
+                args: vec![],
+            },
+            ModelAction::Finish {
+                summary: "not verified".into(),
+            },
+        ]));
+        assert_eq!(
+            agent
+                .run(
+                    &mut provider,
+                    &executor,
+                    &root,
+                    "fix",
+                    &CancellationToken::default()
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
     }
 
     #[test]
