@@ -40,7 +40,7 @@ fn main() -> io::Result<()> {
     let agent = AgentLoop::new(
         max_steps,
         vec!["cargo".to_owned()],
-        vec!["cargo".to_owned()],
+        vec!["cargo test".to_owned()],
         16 * 1024,
     )?;
     let task = env::var("TASK").unwrap_or_else(|_| {
