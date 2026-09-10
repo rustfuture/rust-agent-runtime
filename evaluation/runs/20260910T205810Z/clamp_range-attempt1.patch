@@ -1,0 +1,15 @@
+--- /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.5ySXSB/pristine/clamp_range/src/lib.rs	2026-09-11 00:00:41
++++ /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.5ySXSB/agent/clamp_range-att1/src/lib.rs	2026-09-11 00:02:34
+@@ -1,9 +1,10 @@
+ /// Clamp `value` into the inclusive range `[min, max]`.
+ pub fn clamp(value: i32, min: i32, max: i32) -> i32 {
++    let (min, max) = if min > max { (max, min) } else { (min, max) };
+     if value < min {
+-        max
+-    } else if value > max {
+         min
++    } else if value > max {
++        max
+     } else {
+         value
+     }

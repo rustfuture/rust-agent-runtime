@@ -1,0 +1,3 @@
+clamp_range-task	queued	0	enqueue
+clamp_range-task	running	1	start
+clamp_range-task	succeeded	1	complete

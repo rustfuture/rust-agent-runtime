@@ -136,7 +136,8 @@ fn run_agent_worker(data_dir: &str, id: &str, workspace: &str) -> io::Result<()>
         let _ = Isolation::None;
         executor
     };
-    let agent = AgentLoop::new(max_steps, allowed, verification, max_observation)?;
+    let agent =
+        AgentLoop::new(max_steps, allowed, verification, max_observation)?.with_required_edit(true);
     let mut runtime = Runtime::open(Path::new(data_dir))?;
 
     // Poll the durable log so `cancel DATA_DIR ID` from another process reaches

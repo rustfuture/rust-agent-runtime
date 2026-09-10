@@ -19,6 +19,7 @@ pub struct AgentLoop {
     allowed_programs: Vec<String>,
     verification_programs: Vec<String>,
     max_observation_bytes: usize,
+    require_edit: bool,
 }
 
 impl AgentLoop {
@@ -39,7 +40,15 @@ impl AgentLoop {
             allowed_programs,
             verification_programs,
             max_observation_bytes,
+            require_edit: false,
         })
+    }
+
+    /// When enabled, a `finish` is rejected until at least one edit has been
+    /// applied. The default is disabled so single-command tasks keep working.
+    pub fn with_required_edit(mut self, require_edit: bool) -> Self {
+        self.require_edit = require_edit;
+        self
     }
 
     fn is_verification_command(&self, program: &str, args: &[String]) -> bool {
@@ -91,6 +100,7 @@ impl AgentLoop {
                 &DecisionRequest {
                     task: task.to_owned(),
                     allowed_programs: self.allowed_programs.clone(),
+                    verification_programs: self.verification_programs.clone(),
                     observations: observations.clone(),
                 },
                 cancellation,
@@ -99,6 +109,13 @@ impl AgentLoop {
             decisions.push(decision);
             match action {
                 ModelAction::Finish { summary } => {
+                    if self.require_edit && changed_files.is_empty() {
+                        observations.push(
+                            "finish rejected: no source edit has been applied yet; use read_file then replace_text to make the change"
+                                .to_owned(),
+                        );
+                        continue;
+                    }
                     if needs_verification {
                         observations.push(
                             "finish rejected: run a successful verification command after the latest edit"
@@ -435,6 +452,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read_to_string(root.join("bug.txt")).unwrap(), "good\n");
+        assert!(report.verified_after_change);
+    }
+
+    #[test]
+    fn required_edit_rejects_a_finish_before_any_change() {
+        let root = workspace("require-edit");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(5, vec!["true".to_owned()], vec!["true".to_owned()], 1024)
+            .unwrap()
+            .with_required_edit(true);
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::Finish {
+                summary: "done without editing".to_owned(),
+            },
+            ModelAction::ReadFile {
+                path: "bug.txt".to_owned(),
+            },
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::RunTool {
+                program: "true".to_owned(),
+                args: vec![],
+            },
+            ModelAction::Finish {
+                summary: "fixed".to_owned(),
+            },
+        ]));
+        let report = agent
+            .run(
+                &mut provider,
+                &executor,
+                &root,
+                "fix",
+                &CancellationToken::default(),
+            )
+            .unwrap();
+        assert_eq!(report.summary, "fixed");
+        assert_eq!(report.changed_files, 1);
         assert!(report.verified_after_change);
     }
 

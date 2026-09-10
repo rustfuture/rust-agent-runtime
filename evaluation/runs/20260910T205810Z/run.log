@@ -1,0 +1,16 @@
+run_id=20260910T205810Z
+model=gemini-3.8-flash-low
+work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.5ySXSB
+== family: off_by_one ==
+-- attempt 1 --
+worker_status=1 acceptance_pass=1
+off_by_one: pass
+== family: clamp_range ==
+-- attempt 1 --
+worker_status=1 acceptance_pass=1
+clamp_range: pass
+== family: prefix_format ==
+-- attempt 1 --
+worker_status=1 acceptance_pass=1
+prefix_format: pass
+== summary ==
