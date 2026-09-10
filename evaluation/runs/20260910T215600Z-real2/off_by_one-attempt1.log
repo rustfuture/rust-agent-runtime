@@ -1,0 +1,8 @@
+outcome=failed
+failure_kind=Other
+failure=AGY failed with status Some(1): stderr=error: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.
+ stdout={"conversation_id":"","status":"ERROR","response":"","error":"Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}
+
+error: AGY failed with status Some(1): stderr=error: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.
+ stdout={"conversation_id":"","status":"ERROR","response":"","error":"Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}
+

@@ -1,0 +1,8 @@
+built_binary=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/target/debug/rust-agent-runtime
+built_binary_sha256=974966a8280f11a52a52074554526291fb4a2ddd03a62ac1c47af0b120942683
+source_sha=6683999ac5d150591f726a9c68dfecfd1f8a12f1
+source_dirty_count=2
+harness_sha256=801cd3da31904f87bb0b03fa9324bab67902712c7016e925ff6c745c5a6513ed
+provider_version=1.2.0
+build_command=cargo build --locked --quiet
+worker_command_template=AGENT_TASK=<task> AGENT_ALLOWED=cargo AGENT_VERIFY=cargo test AGENT_MAX_STEPS=6 AGENT_TIMEOUT_SECS=120 AGY_BIN=agy AGY_MODEL=gemini-3.8-flash-low AGY_WORK_DIR=<workspace> [AGENT_FAKE_PROVIDER=<script>] /Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/target/debug/rust-agent-runtime run <data_dir> <task_id> <workspace>

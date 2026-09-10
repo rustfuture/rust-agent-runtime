@@ -1,0 +1,9 @@
+outcome=completed
+summary=The off-by-one error in sum_up_to has been resolved and cargo test passed successfully.
+steps=5
+tool_runs=2
+changed_files=1
+verified_after_change=true
+input_tokens=182712
+output_tokens=10487
+provider_duration_ms=91423
