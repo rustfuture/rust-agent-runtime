@@ -57,6 +57,23 @@ impl AgentLoop {
         task: &str,
         cancellation: &CancellationToken,
     ) -> io::Result<AgentReport> {
+        self.run_observed(provider, executor, cwd, task, cancellation, |_, _, _| {})
+    }
+
+    /// Same as [`AgentLoop::run`], but reports every completed tool run to
+    /// `on_execution` so a durable worker can persist per-command traces.
+    pub fn run_observed<F>(
+        &self,
+        provider: &mut impl ModelProvider,
+        executor: &Executor,
+        cwd: &Path,
+        task: &str,
+        cancellation: &CancellationToken,
+        mut on_execution: F,
+    ) -> io::Result<AgentReport>
+    where
+        F: FnMut(&str, usize, &crate::executor::Execution),
+    {
         let mut observations = Vec::new();
         let editor = WorkspaceEditor::new(cwd, self.max_observation_bytes)?;
         let mut decisions = Vec::new();
@@ -101,6 +118,7 @@ impl AgentLoop {
                     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
                     let execution = executor.run_cancellable(cwd, &program, &refs, cancellation)?;
                     tool_runs += 1;
+                    on_execution(&program, args.len(), &execution);
                     if execution.status == Some(0) && !execution.timed_out && !execution.cancelled {
                         // Only clear the needs_verification flag if the program is a valid verification tool
                         let is_verification = self.is_verification_command(&program, &args);

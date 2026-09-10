@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod executor;
 pub mod provider;
+pub mod worker;
 pub mod workspace;
 
 use executor::{CancellationToken, Execution, Executor};
@@ -45,6 +46,7 @@ pub struct ExecutionTrace {
 pub struct Runtime {
     tasks: HashMap<String, Task>,
     traces: HashMap<String, Vec<ExecutionTrace>>,
+    tool_traces: HashMap<String, Vec<ExecutionTrace>>,
     log: PathBuf,
 }
 
@@ -63,6 +65,7 @@ impl Runtime {
         let mut runtime = Self {
             tasks: HashMap::new(),
             traces: HashMap::new(),
+            tool_traces: HashMap::new(),
             log,
         };
         if runtime.log.exists() {
@@ -169,6 +172,16 @@ impl Runtime {
         self.traces.get(id).map(Vec::as_slice).unwrap_or_default()
     }
 
+    /// Tool executions recorded while an agent worker ran the task. These are
+    /// kept apart from task-level traces so restart recovery never mistakes a
+    /// completed intermediate tool for the terminal result of the task.
+    pub fn tool_traces(&self, id: &str) -> &[ExecutionTrace] {
+        self.tool_traces
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
     /// Requeues a failed task if its completed attempt count is below `max_attempts`.
     /// The caller remains responsible for ensuring the command is safe to repeat.
     pub fn retry(&mut self, id: &str, max_attempts: u32) -> io::Result<bool> {
@@ -263,8 +276,32 @@ impl Runtime {
         Ok(())
     }
 
-    fn record_execution(
+    pub fn record_execution(
         &mut self,
+        id: &str,
+        program: &str,
+        argument_count: usize,
+        execution: &Execution,
+    ) -> io::Result<()> {
+        self.record_trace("trace", id, program, argument_count, execution)
+    }
+
+    /// Record a tool run performed inside an agent worker. Stored separately
+    /// from task-level traces so restart recovery never mistakes an
+    /// intermediate tool run for the terminal result of the task.
+    pub fn record_tool_trace(
+        &mut self,
+        id: &str,
+        program: &str,
+        argument_count: usize,
+        execution: &Execution,
+    ) -> io::Result<()> {
+        self.record_trace("tool", id, program, argument_count, execution)
+    }
+
+    fn record_trace(
+        &mut self,
+        kind: &str,
         id: &str,
         program: &str,
         argument_count: usize,
@@ -299,7 +336,7 @@ impl Runtime {
             .open(&self.log)?;
         writeln!(
             file,
-            "trace\t{id}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{kind}\t{id}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             trace.attempt,
             trace.program,
             trace.argument_count,
@@ -314,13 +351,22 @@ impl Runtime {
             trace.duration_ms
         )?;
         file.sync_data()?;
-        self.traces.entry(id.to_owned()).or_default().push(trace);
+        let target = if kind == "tool" {
+            &mut self.tool_traces
+        } else {
+            &mut self.traces
+        };
+        target.entry(id.to_owned()).or_default().push(trace);
         Ok(())
     }
 
     fn apply_line(&mut self, line: &str) {
-        if let Some(trace) = parse_trace(line) {
-            self.traces.entry(trace.0).or_default().push(trace.1);
+        if let Some((id, trace)) = parse_trace(line) {
+            self.traces.entry(id).or_default().push(trace);
+            return;
+        }
+        if let Some((id, trace)) = parse_tool_trace(line) {
+            self.tool_traces.entry(id).or_default().push(trace);
             return;
         }
         let mut parts = line.split('\t');
@@ -347,6 +393,20 @@ fn parse_trace(line: &str) -> Option<(String, ExecutionTrace)> {
     if parts.next()? != "trace" {
         return None;
     }
+    parse_trace_fields(parts)
+}
+
+fn parse_tool_trace(line: &str) -> Option<(String, ExecutionTrace)> {
+    let mut parts = line.split('\t');
+    if parts.next()? != "tool" {
+        return None;
+    }
+    parse_trace_fields(parts)
+}
+
+fn parse_trace_fields<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+) -> Option<(String, ExecutionTrace)> {
     let id = parts.next()?.to_owned();
     let attempt = parts.next()?.parse().ok()?;
     let program = parts.next()?.to_owned();
@@ -463,6 +523,26 @@ mod tests {
         }
         let rt = Runtime::open(&dir).unwrap();
         assert_eq!(rt.task("c").unwrap().state, State::Cancelled);
+    }
+
+    #[test]
+    fn cancel_through_inspection_does_not_requeue() {
+        let dir = temp();
+        {
+            let mut rt = Runtime::open(&dir).unwrap();
+            rt.enqueue("live").unwrap();
+            rt.start("live").unwrap();
+        }
+        {
+            let mut rt = Runtime::inspect(&dir).unwrap();
+            assert_eq!(rt.task("live").unwrap().state, State::Running);
+            rt.cancel("live").unwrap();
+        }
+        let rt = Runtime::inspect(&dir).unwrap();
+        assert_eq!(rt.task("live").unwrap().state, State::Cancelled);
+        assert!(!fs::read_to_string(dir.join("events.log"))
+            .unwrap()
+            .contains("restart_recovery"));
     }
 
     #[test]
