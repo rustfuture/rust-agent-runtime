@@ -66,6 +66,11 @@ sha256() {
   fi
 }
 
+# Capture the pre-run source state before this harness creates any evidence
+# directory, so the dirty count cannot include its own run output.
+SOURCE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+DIRTY_COUNT="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 BASE_OUT="$REPO_ROOT/evaluation/runs/$RUN_ID"
 OUT="$BASE_OUT"
@@ -138,8 +143,6 @@ if [ ! -x "$BIN" ]; then
   exit 2
 fi
 BIN_SHA="$(sha256 "$BIN")"
-SOURCE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-DIRTY_COUNT="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 HARNESS_SHA="$(sha256 "$REPO_ROOT/evaluation/run_fresh_evaluation.sh")"
 PROVIDER_VERSION="$("$AGY_BIN" --version 2>/dev/null | head -n 1 || true)"
 {

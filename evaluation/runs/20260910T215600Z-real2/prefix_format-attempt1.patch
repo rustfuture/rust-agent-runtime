@@ -1,0 +1,9 @@
+diff -ruN --exclude=target /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.yaS45j/pristine/prefix_format/src/lib.rs /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.yaS45j/agent/prefix_format-att1/src/lib.rs
+--- /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.yaS45j/pristine/prefix_format/src/lib.rs	2026-09-11 00:57:31
++++ /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.yaS45j/agent/prefix_format-att1/src/lib.rs	2026-09-11 00:58:11
+@@ -1,4 +1,4 @@
+ /// Return the prefix followed by the trimmed name.
+ pub fn label(prefix: &str, name: &str) -> String {
+-    format!("{}", name.trim())
++    format!("{}{}", prefix, name.trim())
+ }

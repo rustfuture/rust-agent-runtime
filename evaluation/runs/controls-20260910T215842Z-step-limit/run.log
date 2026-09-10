@@ -1,0 +1,22 @@
+run_id=controls-20260910T215842Z-step-limit
+requested_run_id=controls-20260910T215842Z-step-limit
+run_id_collisions=0
+model=gemini-3.8-flash-low
+provider_binary=agy
+fake_provider=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fake_providers/step_limit.sh
+fixture_root=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/fresh_fixtures
+families=off_by_one
+max_steps=4
+timeout_secs=120
+max_attempts=1
+agent_allowed=cargo
+agent_verify=cargo test
+work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.dZCpzs
+== family: off_by_one ==
+-- attempt 1 --
+worker_status=1 state=failed worker_clean=false acceptance_pass=true failure_kind=step_limit
+off_by_one: pass=false baseline=failed_as_expected harness_ok=true acceptance=true worker_clean=false failure_kind=step_limit
+summary:
+family	baseline_failed_as_expected	harness_ok	patch_acceptance_pass	worker_clean_success	failure_kind	attempts	worker_seconds	input_tokens	output_tokens
+off_by_one	true	true	true	false	step_limit	1	2	0	0
+exit_status=1

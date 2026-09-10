@@ -1,0 +1,8 @@
+warning: unused variable: `prefix`
+ --> src/lib.rs:2:14
+  |
+2 | pub fn label(prefix: &str, name: &str) -> String {
+  |              ^^^^^^ help: if this is intentional, prefix it with an underscore: `_prefix`
+  |
+  = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+

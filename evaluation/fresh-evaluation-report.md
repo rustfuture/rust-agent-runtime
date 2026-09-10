@@ -1,11 +1,13 @@
 # Fresh-Fixture Agent Evaluation (independent acceptance)
 
-Date: 2026-09-10
+Date: 2026-09-10/11
 Model: `gemini-3.8-flash-low` via the AGY structured-output provider
-Provider binary: `agy 1.1.27`
+Provider binary: `agy 1.2.0`
 Runtime: `rust-agent-runtime` (durable worker + bounded executor + macOS seatbelt)
 Host: macOS Apple Silicon, `rustc 1.94.1`
-Code under test: the commit that adds this report
+Code under test: commits `23925b1` (explicit verify action) and `6683999` (trustworthy harness +
+controls); real runs additionally record the harness and binary hashes below.
+Historical runs from before these commits are preserved under `evaluation/runs/`.
 
 ## What this measures
 
@@ -18,61 +20,143 @@ crate is compiled and tested. A model that edited or deleted the visible test ca
 
 Each family is allowed at most one controlled retry. All attempts are kept.
 
-## Harness
+## Verification contract (what changed for this round)
 
-- `evaluation/fresh_fixtures/<family>/` — pristine buggy crate with `tests/acceptance.rs`.
-- `evaluation/run_fresh_evaluation.sh` — orchestrates baseline, run, and independent acceptance.
-- Runs: `evaluation/runs/<UTC run id>/` with per-attempt worker log, acceptance log, patch, and the
-  durable event log under `data/`.
+The previous matcher accepted `run_tool` as verification only when the program and argv matched the
+configured command **exactly**. Real traces show why that failed: successful cargo invocations with
+extra arguments (`argc=2`/`argc=3`, `status=0`) were never accepted, so a correct patch could reach the
+step limit without a clean terminal state
+(`evaluation/runs/20260910T204955Z/data/*/events.log`, `.../20260910T205810Z/data/*/events.log`).
 
-The agent workspace is a separate temporary copy. On macOS the tool executor is wrapped in the opt-in
-Seatbelt profile (denies network and writes outside the workspace) and AGY runs with `--sandbox`.
-Provider and executor run under the local supervisor with a wall-clock timeout, an output byte cap,
-and a process group (see `docs/architecture.md`).
+The runtime now exposes an explicit `verify` action. The model cannot add flags, chain commands, or
+substitute a program: the runtime itself runs the operator-configured `AGENT_VERIFY` command verbatim
+through the bounded executor, and only a passing result clears the edit debt. A successful `run_tool`
+never verifies. Regression tests cover: finish before any edit rejected, edit → verify → finish
+accepted, verify → new edit → finish rejected until re-verified, run_tool with extra flags not
+accepted, unconfigured verification denied, timeout during verify keeps the debt, and the existing
+output-cap, cancellation, and restart-recovery behavior.
 
-## Results
+## Harness trust properties
 
-### Run `20260910T210723Z` (final)
+- `cargo build --locked` runs first; on failure the run records `build_failure`, exits 2, and never
+  uses a stale binary. The built binary sha256, source sha, harness sha, dirty count, provider
+  version, limits, and exact commands are recorded in `metadata.txt`.
+- A baseline crate that fails to build is recorded as a harness/configuration error, never as an
+  expected baseline failure. An unexpected baseline pass is recorded as a configuration error too.
+- Fixture/acceptance copy errors are fatal signals (`harness_ok=false`); before acceptance the copy is
+  compared (`cmp`) against the agent's `src/`, so acceptance can never silently run on pristine code.
+- A colliding `RUN_ID` is suffixed (`-1`, `-2`, …); existing evidence is preserved.
+- One family failing cannot stop the other families.
+- Process exit code: `0` only when every family passes baseline, harness, independent acceptance, and
+  a clean worker terminal state; `2` for any harness/build failure; `1` for partial results.
+- `summary.tsv` records per-family `baseline_failed_as_expected`, `harness_ok`,
+  `patch_acceptance_pass`, `worker_clean_success`, `failure_kind`
+  (`step_limit | wall_timeout | cancelled | provider_error | other | none`), attempts, duration, and
+  tokens.
+- Only the temporary work directory created by the run is removed; all evidence stays.
 
-| Family | Worker outcome | Worker terminal state | Independent acceptance | Patch |
-|---|---|---|---|---|
-| `off_by_one` | `failed` (`TimedOut`, step limit) | failed | **pass** | `for i in 1..n` → `1..=n` |
-| `clamp_range` | `completed` | **succeeded** | **pass** | swapped branches to `min`/`max` for out-of-range values |
-| `prefix_format` | `failed` (`TimedOut`, step limit) | failed | **pass** | `format!("{}", name.trim())` → `format!("{}{}", prefix, name.trim())` |
+Fixtures set `doctest = false`: rustdoc creates its scratch directory in `$TMPDIR`, which the macOS
+Seatbelt profile (writes restricted to the workspace) correctly denies. These fixtures have no
+doctests, so this changes nothing about the acceptance semantics.
 
-Aggregate: **3 / 3 independent acceptance passes**; **1 / 3 clean worker successes**. The two
-non-clean cases applied a correct patch but reached the step limit before issuing an accepted
-`finish`, because they ran the verification command with extra arguments that the runtime's exact
-verification matcher does not accept. This is reported as-is: a correct patch is not the same as a
-clean terminal state.
+## Deterministic controls (no real model)
 
-### Run `20260910T205810Z`
+`evaluation/run_controls.sh` drives the real harness through `AGENT_FAKE_PROVIDER`: a local script
+emits AGY-shaped JSON envelopes through the same supervised provider path, so the local wall-clock
+timeout, captured-output cap, process group, and cancellation remain enforced, and tool programs still
+pass through the executor allowlist (also covered by `src/provider.rs` unit tests and
+`tests/cli_fake_provider.rs`).
 
-Same fixtures before the worker was hardened. Independent acceptance **3 / 3**; every worker run
-ended in a step-limit timeout. The patches were already correct.
+Final control run `evaluation/runs/controls-20260910T215842Z-*` (24 checks, 0 failures):
 
-### Run `20260910T204955Z` (defect discovery)
+| Control | Expected | Observed |
+|---|---|---|
+| build/configuration failure (`EVAL_CARGO_BIN` fails) | exit 2, `build_failure` marker, no family run | pass |
+| invalid baseline (baseline unexpectedly passes) | exit 2, `baseline_failed_as_expected=false` | pass |
+| acceptance failure (agent weakens the visible test) | exit 1, worker clean, acceptance fails | pass |
+| correct patch but no verify (step limit) | exit 1, acceptance pass, `failure_kind=step_limit` | pass |
+| correct patch but provider wall timeout | exit 1, acceptance pass, `failure_kind=wall_timeout` | pass |
+| fully successful run | exit 0, acceptance pass, worker clean, `failure_kind=none` | pass |
+| same `RUN_ID` rerun | first evidence preserved, second run suffixed `-1` | pass |
 
-The first run exposed a real product defect: the model returned `finish` describing a change it had
-not applied (`changed_files=0`, `tool_runs=0`) and the worker recorded `succeeded`. This motivated two
-fixes included in the code under test:
+## Real-model run `20260910T215500Z-real` (primary)
 
-1. `AgentLoop::with_required_edit(true)` (used by the `run` CLI) rejects a `finish` until at least one
-   edit has been applied.
-2. `worker::run_agent_task` treats a finish with no change, or with an unverified change, as a failure
-   rather than a success.
+Command:
 
-The harness in this run also had a missing `mkdir` that prevented the acceptance copy; that is fixed
-in the script and does not affect later runs.
+```bash
+RUN_ID=20260910T215500Z-real AGY_BIN=agy AGY_MODEL=gemini-3.8-flash-low \
+  AGENT_MAX_STEPS=6 AGENT_TIMEOUT_SECS=120 bash evaluation/run_fresh_evaluation.sh
+```
+
+Metadata: `source_sha=6683999ac5d150591f726a9c68dfecfd1f8a12f1`,
+`harness_sha256=801cd3da31904f87bb0b03fa9324bab67902712c7016e925ff6c745c5a6513ed`,
+binary sha256 `974966a8280f11a52a52074554526291fb4a2ddd03a62ac1c47af0b120942683`,
+`source_dirty_count=2` (the preserved untracked `tests/fixtures/unwrap-panic/Cargo.lock` plus this
+run's own evidence directory; the later harness revision measures dirty state before creating its
+run directory).
+
+| Family | Baseline | Independent acceptance | Worker terminal state | failure_kind | Attempts | Duration | Input tokens | Output tokens | Patch |
+|---|---|---|---|---|---|---|---|---|---|
+| `off_by_one` | failed as expected | **pass** | **succeeded** | none | 1 | 94 s | 182,712 | 10,487 | `1..n` → `1..=n` |
+| `clamp_range` | failed as expected | **pass** | **succeeded** | none | 1 | 33 s | 145,338 | 466 | swapped `min`/`max` branches |
+| `prefix_format` | failed as expected | **pass** | **succeeded** | none | 1 | 97 s | 230,102 | 16,459 | `format!("{}", name.trim())` → `format!("{}{}", prefix, name.trim())` |
+
+Aggregate: **3/3 independent acceptance passes**, **3/3 clean worker successes**, no retries needed,
+no step-limit or wall-timeout failures. Every event log ends with `succeeded` and each shows the
+runtime-run verification (`tool cargo argc=1`) with status 0.
+
+## Real-model confirmation run `20260910T215600Z-real2`
+
+A second run confirmed the result after a metadata-only harness change (dirty count measured before
+the run directory is created). Metadata: `source_sha=6683999...`, `harness_sha256=6033c654...`,
+`source_dirty_count=3` (untracked fixture lock, the uncommitted metadata fix, and the first run
+directory).
+
+| Family | Baseline | Acceptance | Worker terminal state | failure_kind | Attempts | Duration | Notes |
+|---|---|---|---|---|---|---|---|
+| `off_by_one` | failed as expected | pass (attempt 2) | failed (both attempts) | provider_error | 2 | 70 s | AGY returned `503 The service is currently unavailable` on a provider call in both attempts |
+| `clamp_range` | failed as expected | pass | succeeded | none | 1 | 71 s | clean |
+| `prefix_format` | failed as expected | pass | succeeded | none | 1 | 53 s | clean |
+
+Attempt 1 of `off_by_one` was cut short by the 503 before the patch landed; attempt 2 applied the
+correct patch and the runtime verification passed, but the next provider call also received 503, so
+the worker could not finish. This is an external provider-availability failure, not a step-limit or
+wall-timeout failure, and it is reported as-is.
+
+Aggregate across both real runs: **6/6 independent acceptance passes**, **5/6 clean worker
+successes**; the single non-clean case is the provider 503 above. No fixed claim beyond this suite is
+made: three tiny synthetic crates are not a general benchmark.
+
+## Historical evidence (preserved)
+
+- `evaluation/runs/20260910T210723Z` — pre-fix round: acceptance 3/3, clean worker 1/3; the two
+  non-clean cases ran verification with extra arguments that exact argv matching rejected.
+- `evaluation/runs/20260910T205810Z` — pre-hardening: acceptance 3/3, all workers step-limited.
+- `evaluation/runs/20260910T204955Z` — defect discovery: premature no-edit finish and the missing
+  `mkdir` acceptance bug.
+- `evaluation/runs/controls-20260910T214922Z-*` and `controls-20260910T215842Z-*` — deterministic
+  control runs (24/24 checks each).
+
+## Commands run for this round
+
+```bash
+cargo fmt --check
+cargo check --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+bash evaluation/run_controls.sh
+RUN_ID=20260910T215500Z-real  ... bash evaluation/run_fresh_evaluation.sh
+RUN_ID=20260910T215600Z-real2 ... bash evaluation/run_fresh_evaluation.sh
+```
 
 ## Honest limitations
 
 - Three tiny synthetic crates are not a general benchmark and give no autonomy claim.
-- The model sometimes applies the correct fix but does not reach a clean terminal state within the
-  step budget. Both the timeout and the correct patch are reported; neither is hidden.
-- Verification matching is intentionally exact (`cargo test`, not `cargo test --quiet`). The system
-  prompt now lists the exact `verification_programs`, but the model does not always comply.
-- Token/cost figures are provider-reported and may omit fixed context overhead; this run is not a cost
+- The confirmation run hit a transient provider 503; provider availability is outside the runtime's
+  control, and the run is reported including the failed family and both attempts.
+- Token/cost figures are provider-reported and may omit fixed context overhead; this is not a cost
   study.
-- The `run` CLI is exercised with the real provider. Deterministic worker behavior (durable state,
-  separate tool traces, cancellation, restart recovery) is covered by `cargo test`, not by these runs.
+- Step-limit and wall-timeout behavior is covered by deterministic controls and unit tests, not by the
+  real-model runs (which produced neither in this round).
+- Acceptance tests exercise intended behavior, not full semantic correctness; the independent copy
+  only takes `src/`, so test tampering cannot pass.

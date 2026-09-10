@@ -1,0 +1,9 @@
+outcome=completed
+summary=The failing test has been fixed by including the prefix in `label(prefix, name)`, and verification via `cargo test` succeeded with all tests passing.
+steps=5
+tool_runs=1
+changed_files=1
+verified_after_change=true
+input_tokens=285581
+output_tokens=987
+provider_duration_ms=51030

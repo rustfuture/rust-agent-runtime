@@ -1,0 +1,11 @@
+family=prefix_format
+baseline=failed_as_expected
+baseline_failed_as_expected=true
+harness_ok=true
+patch_acceptance_pass=true
+worker_clean_success=true
+failure_kind=none
+attempts=1
+worker_seconds=97
+input_tokens=230102
+output_tokens=16459

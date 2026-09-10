@@ -1,0 +1,4 @@
+clamp_range-task	queued	0	enqueue
+clamp_range-task	running	1	start
+tool	clamp_range-task	1	cargo	1	0	false	false	false	255	369	774
+clamp_range-task	succeeded	1	complete

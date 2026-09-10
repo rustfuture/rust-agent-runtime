@@ -1,0 +1,9 @@
+outcome=completed
+summary=Task verified and completed successfully.
+steps=6
+tool_runs=1
+changed_files=1
+verified_after_change=true
+input_tokens=230102
+output_tokens=16459
+provider_duration_ms=96087

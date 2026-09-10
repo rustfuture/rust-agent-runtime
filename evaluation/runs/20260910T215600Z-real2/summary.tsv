@@ -1,0 +1,4 @@
+family	baseline_failed_as_expected	harness_ok	patch_acceptance_pass	worker_clean_success	failure_kind	attempts	worker_seconds	input_tokens	output_tokens
+off_by_one	true	true	true	false	provider_error	2	70	0	0
+clamp_range	true	true	true	true	none	1	71	145573	15776
+prefix_format	true	true	true	true	none	1	53	285581	987
