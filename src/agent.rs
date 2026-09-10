@@ -70,11 +70,14 @@ impl AgentLoop {
                     "agent cancelled",
                 ));
             }
-            let decision = provider.decide(&DecisionRequest {
-                task: task.to_owned(),
-                allowed_programs: self.allowed_programs.clone(),
-                observations: observations.clone(),
-            })?;
+            let decision = provider.decide_cancellable(
+                &DecisionRequest {
+                    task: task.to_owned(),
+                    allowed_programs: self.allowed_programs.clone(),
+                    observations: observations.clone(),
+                },
+                cancellation,
+            )?;
             let action = decision.action.clone();
             decisions.push(decision);
             match action {
@@ -295,6 +298,62 @@ mod tests {
                 .kind(),
             io::ErrorKind::PermissionDenied
         );
+    }
+
+    #[test]
+    fn cancellation_is_propagated_to_the_provider() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct Probe {
+            invoked: Arc<AtomicBool>,
+        }
+        impl ModelProvider for Probe {
+            fn decide(&mut self, _: &DecisionRequest) -> io::Result<ModelDecision> {
+                panic!("plain decide must not be used when a cancellation token is available");
+            }
+            fn decide_cancellable(
+                &mut self,
+                _: &DecisionRequest,
+                cancellation: &CancellationToken,
+            ) -> io::Result<ModelDecision> {
+                self.invoked.store(true, Ordering::SeqCst);
+                cancellation.cancel();
+                Ok(ModelDecision {
+                    action: ModelAction::RunTool {
+                        program: "true".to_owned(),
+                        args: vec![],
+                    },
+                    model: "probe".to_owned(),
+                    duration_ms: 0,
+                    input_tokens: None,
+                    output_tokens: None,
+                })
+            }
+        }
+
+        let root = workspace("provider-cancel");
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent =
+            AgentLoop::new(3, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let mut provider = Probe {
+            invoked: Arc::clone(&invoked),
+        };
+        let error = agent
+            .run(
+                &mut provider,
+                &executor,
+                &root,
+                "task",
+                &CancellationToken::default(),
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert!(invoked.load(Ordering::SeqCst));
     }
 
     #[test]

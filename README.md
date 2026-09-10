@@ -8,7 +8,9 @@ The first milestone intentionally contains no LLM and no arbitrary shell executi
 cargo test --locked
 ```
 
-The bounded executor rejects program paths and non-allowlisted programs, canonicalizes the working directory under the configured workspace, kills timed-out children and Unix descendants in their process group, disables stdin, and truncates captured stdout/stderr at a configured byte limit. These controls are not an OS sandbox and do not by themselves isolate network access.
+The bounded executor rejects program paths and non-allowlisted programs, canonicalizes the working directory under the configured workspace, kills timed-out children and Unix descendants in their process group, disables stdin, and truncates captured stdout/stderr at a configured byte limit. These controls are not an OS sandbox and do not by themselves isolate network access. If a descendant inherits a pipe and keeps it open after the direct child exits, the executor stops reading after a short bounded grace period instead of blocking.
+
+The provider adapter runs its child process under the same supervisor: a dedicated process group, a local wall-clock timeout, a captured-output byte limit, and cancellation. The runtime's `--print-timeout` is a secondary bound; a cancelled task kills the active provider process group, and streaming is stopped by a watchdog. Killing a timed-out or cancelled process is termination, not isolation.
 
 `Runtime::run_next` deterministically selects the lowest queued task id, persists `running`, executes through the bounded executor, and records `succeeded` only for a zero exit status without timeout; all other outcomes become `failed`.
 
