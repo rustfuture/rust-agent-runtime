@@ -67,7 +67,7 @@ timeout, captured-output cap, process group, and cancellation remain enforced, a
 pass through the executor allowlist (also covered by `src/provider.rs` unit tests and
 `tests/cli_fake_provider.rs`).
 
-Final control run `evaluation/runs/controls-20260910T215842Z-*` (24 checks, 0 failures):
+Final control run `evaluation/runs/controls-20260910T220053Z-*` (28 checks, 0 failures):
 
 | Control | Expected | Observed |
 |---|---|---|
@@ -77,6 +77,7 @@ Final control run `evaluation/runs/controls-20260910T215842Z-*` (24 checks, 0 fa
 | correct patch but no verify (step limit) | exit 1, acceptance pass, `failure_kind=step_limit` | pass |
 | correct patch but provider wall timeout | exit 1, acceptance pass, `failure_kind=wall_timeout` | pass |
 | fully successful run | exit 0, acceptance pass, worker clean, `failure_kind=none` | pass |
+| mixed families (missing fixture then off_by_one) | exit 2, failing family recorded, later family still runs and passes | pass |
 | same `RUN_ID` rerun | first evidence preserved, second run suffixed `-1` | pass |
 
 ## Real-model run `20260910T215500Z-real` (primary)
