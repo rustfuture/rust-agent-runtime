@@ -52,4 +52,13 @@ cargo run --locked -- watch ./runtime-data 500
 
 `cancel` accepts only queued/running tasks and is idempotent for an already-cancelled task. `status` and `watch` use a read-only replay path, so observing a running task cannot trigger restart recovery.
 
+The `run` command connects a durable task to the agent loop:
+
+```bash
+AGENT_TASK="make the failing test pass" AGENT_ALLOWED="cargo" AGENT_VERIFY="cargo test" \
+  cargo run --locked -- run ./runtime-data demo-task ./fixture
+```
+
+It enqueues the id if absent, records `running` before any model call, persists each completed tool run as a tool trace, and writes a terminal state. A separate `cancel DATA_DIR ID` process is observed through the event log and signals the live worker's cancellation token (the CLI `cancel` uses the read-only replay path so it does not requeue a running task as a side effect). Tool traces are stored apart from task-level traces, so an interrupted worker is requeued on restart rather than being mistaken for a completed command. A crash after an external side effect but before its trace is synced cannot be made exactly-once by this local log; side-effecting tools still need idempotency keys.
+
 See `docs/architecture.md` for the trust boundary and `RELEASE_NOTES.md` for the current candidate scope. Licensed under MIT.
