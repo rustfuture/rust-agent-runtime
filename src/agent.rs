@@ -14,10 +14,31 @@ pub struct AgentReport {
     pub verified_after_change: bool,
 }
 
+/// One configured verification command, split into its exact program and
+/// arguments. The model cannot add, remove, or reorder tokens: a `verify`
+/// action runs this command verbatim through the bounded executor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerificationCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+impl VerificationCommand {
+    fn parse(command: &str) -> Option<Self> {
+        let mut parts = command.split_whitespace();
+        let program = parts.next()?.to_owned();
+        Some(Self {
+            program,
+            args: parts.map(str::to_owned).collect(),
+        })
+    }
+}
+
 pub struct AgentLoop {
     max_steps: usize,
     allowed_programs: Vec<String>,
     verification_programs: Vec<String>,
+    verification_commands: Vec<VerificationCommand>,
     max_observation_bytes: usize,
     require_edit: bool,
 }
@@ -35,10 +56,15 @@ impl AgentLoop {
                 "limits must be positive",
             ));
         }
+        let verification_commands = verification_programs
+            .iter()
+            .filter_map(|command| VerificationCommand::parse(command))
+            .collect();
         Ok(Self {
             max_steps,
             allowed_programs,
             verification_programs,
+            verification_commands,
             max_observation_bytes,
             require_edit: false,
         })
@@ -51,11 +77,48 @@ impl AgentLoop {
         self
     }
 
-    fn is_verification_command(&self, program: &str, args: &[String]) -> bool {
-        self.verification_programs.iter().any(|allowed| {
-            let mut parts = allowed.split_whitespace();
-            parts.next() == Some(program) && parts.eq(args.iter().map(String::as_str))
-        })
+    /// Run every configured verification command exactly as configured and
+    /// report whether all of them passed. Returns observations for the model
+    /// and whether the verification debt can be cleared.
+    fn run_verification<F>(
+        &self,
+        executor: &Executor,
+        cwd: &Path,
+        cancellation: &CancellationToken,
+        on_execution: &mut F,
+    ) -> io::Result<(bool, Vec<String>)>
+    where
+        F: FnMut(&str, usize, &crate::executor::Execution),
+    {
+        if self.verification_commands.is_empty() {
+            return Ok((
+                false,
+                vec!["verify rejected: no verification command is configured".to_owned()],
+            ));
+        }
+        let mut passed = true;
+        let mut observations = Vec::new();
+        for command in &self.verification_commands {
+            let refs: Vec<&str> = command.args.iter().map(String::as_str).collect();
+            let execution = executor.run_cancellable(cwd, &command.program, &refs, cancellation)?;
+            on_execution(&command.program, command.args.len(), &execution);
+            let command_passed =
+                execution.status == Some(0) && !execution.timed_out && !execution.cancelled;
+            passed &= command_passed;
+            observations.push(truncate(
+                format!(
+                    "verify program={} status={:?} timeout={} cancelled={} stdout={} stderr={}",
+                    command.program,
+                    execution.status,
+                    execution.timed_out,
+                    execution.cancelled,
+                    execution.stdout,
+                    execution.stderr
+                ),
+                self.max_observation_bytes,
+            ));
+        }
+        Ok((passed, observations))
     }
 
     pub fn run(
@@ -137,14 +200,10 @@ impl AgentLoop {
                     tool_runs += 1;
                     on_execution(&program, args.len(), &execution);
                     if execution.status == Some(0) && !execution.timed_out && !execution.cancelled {
-                        // Only clear the needs_verification flag if the program is a valid verification tool
-                        let is_verification = self.is_verification_command(&program, &args);
-
-                        if is_verification {
-                            needs_verification = false;
-                        } else {
-                            observations.push("Note: This command succeeded but is not considered a formal verification of the task. Please run tests or builds.".to_string());
-                        }
+                        observations.push(
+                            "Note: run_tool never clears verification debt; use the verify action to run the configured verification command."
+                                .to_owned(),
+                        );
                     }
                     let observation = format!(
                         "program={program} status={:?} timeout={} cancelled={} stdout={} stderr={}",
@@ -155,6 +214,15 @@ impl AgentLoop {
                         execution.stderr
                     );
                     observations.push(truncate(observation, self.max_observation_bytes));
+                }
+                ModelAction::Verify => {
+                    let (passed, verification_observations) =
+                        self.run_verification(executor, cwd, cancellation, &mut on_execution)?;
+                    tool_runs += self.verification_commands.len();
+                    if passed {
+                        needs_verification = false;
+                    }
+                    observations.extend(verification_observations);
                 }
                 ModelAction::ReadFile { path } => match editor.read(&path) {
                     Ok(content) => {
@@ -258,20 +326,206 @@ mod tests {
     }
 
     #[test]
-    fn verification_matches_exact_arguments_and_defaults_to_deny() {
+    fn verify_runs_the_configured_command_verbatim() {
+        let root = workspace("verify-verbatim");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(
+            3,
+            vec!["true".to_owned()],
+            vec!["true --configured-flag".to_owned()],
+            1024,
+        )
+        .unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Verify,
+            ModelAction::Finish {
+                summary: "fixed".to_owned(),
+            },
+        ]));
+        let mut observed = Vec::new();
+        let report = agent
+            .run_observed(
+                &mut provider,
+                &executor,
+                &root,
+                "fix",
+                &CancellationToken::default(),
+                |program, argument_count, _| {
+                    observed.push((program.to_owned(), argument_count));
+                },
+            )
+            .unwrap();
+        assert_eq!(report.summary, "fixed");
+        assert!(report.verified_after_change);
+        assert_eq!(
+            observed,
+            vec![("true".to_owned(), 1)],
+            "verify must run the configured program with the configured arguments only"
+        );
+    }
+
+    #[test]
+    fn run_tool_with_extra_flags_is_not_a_verification() {
+        let root = workspace("extra-flags");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
         let agent =
-            AgentLoop::new(3, vec!["cargo".into()], vec!["cargo test".into()], 1024).unwrap();
-        assert!(agent.is_verification_command("cargo", &["test".into()]));
-        for args in [
-            vec![],
-            vec!["--version".into()],
-            vec!["test".into(), "--help".into()],
-            vec!["test --help".into()],
-        ] {
-            assert!(!agent.is_verification_command("cargo", &args));
-        }
-        let empty = AgentLoop::new(3, vec!["true".into()], vec![], 1024).unwrap();
-        assert!(!empty.is_verification_command("true", &[]));
+            AgentLoop::new(3, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::RunTool {
+                program: "true".to_owned(),
+                args: vec!["--quiet".to_owned()],
+            },
+            ModelAction::Finish {
+                summary: "not verified".to_owned(),
+            },
+        ]));
+        assert_eq!(
+            agent
+                .run(
+                    &mut provider,
+                    &executor,
+                    &root,
+                    "fix",
+                    &CancellationToken::default()
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut,
+            "an allowlisted run_tool, even one that succeeds, never clears verification debt"
+        );
+    }
+
+    #[test]
+    fn verify_defaults_to_deny_when_unconfigured() {
+        let root = workspace("verify-unconfigured");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent = AgentLoop::new(3, vec!["true".to_owned()], vec![], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Verify,
+            ModelAction::Finish {
+                summary: "not verified".to_owned(),
+            },
+        ]));
+        assert_eq!(
+            agent
+                .run(
+                    &mut provider,
+                    &executor,
+                    &root,
+                    "fix",
+                    &CancellationToken::default()
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+    }
+
+    #[test]
+    fn a_new_edit_reopens_the_verification_debt() {
+        let root = workspace("reopen-debt");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["true".to_owned()], Duration::from_secs(1), 1024).unwrap();
+        let agent =
+            AgentLoop::new(6, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Verify,
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "good".to_owned(),
+                replacement: "best".to_owned(),
+            },
+            ModelAction::Finish {
+                summary: "stale verification".to_owned(),
+            },
+            ModelAction::Verify,
+            ModelAction::Finish {
+                summary: "fixed".to_owned(),
+            },
+        ]));
+        let report = agent
+            .run(
+                &mut provider,
+                &executor,
+                &root,
+                "fix",
+                &CancellationToken::default(),
+            )
+            .unwrap();
+        assert_eq!(report.summary, "fixed");
+        assert_eq!(report.changed_files, 1);
+        assert_eq!(
+            report.decisions.len(),
+            6,
+            "the finish after the second edit must be rejected until a new verify"
+        );
+        assert_eq!(report.tool_runs, 2);
+    }
+
+    #[test]
+    fn timeout_during_verify_keeps_the_verification_debt() {
+        let root = workspace("verify-timeout");
+        fs::write(root.join("bug.txt"), "bad\n").unwrap();
+        let executor =
+            Executor::new(&root, ["sleep".to_owned()], Duration::from_millis(50), 1024).unwrap();
+        let agent = AgentLoop::new(
+            3,
+            vec!["sleep".to_owned()],
+            vec!["sleep 1".to_owned()],
+            1024,
+        )
+        .unwrap();
+        let mut provider = FakeProvider(VecDeque::from([
+            ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            },
+            ModelAction::Verify,
+            ModelAction::Finish {
+                summary: "not verified".to_owned(),
+            },
+        ]));
+        assert_eq!(
+            agent
+                .run(
+                    &mut provider,
+                    &executor,
+                    &root,
+                    "fix",
+                    &CancellationToken::default()
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
     }
 
     #[test]
@@ -434,10 +688,7 @@ mod tests {
                 expected: "bad".to_owned(),
                 replacement: "good".to_owned(),
             },
-            ModelAction::RunTool {
-                program: "true".to_owned(),
-                args: vec![],
-            },
+            ModelAction::Verify,
             ModelAction::Finish {
                 summary: "fixed".to_owned(),
             },
@@ -476,10 +727,7 @@ mod tests {
                 expected: "bad".to_owned(),
                 replacement: "good".to_owned(),
             },
-            ModelAction::RunTool {
-                program: "true".to_owned(),
-                args: vec![],
-            },
+            ModelAction::Verify,
             ModelAction::Finish {
                 summary: "fixed".to_owned(),
             },

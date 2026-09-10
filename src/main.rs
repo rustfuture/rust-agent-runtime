@@ -123,6 +123,11 @@ fn run_agent_worker(data_dir: &str, id: &str, workspace: &str) -> io::Result<()>
         Duration::from_secs(timeout_secs),
     )?
     .with_output_limit(max_output)?;
+    if let Some(script) = env::var_os("AGENT_FAKE_PROVIDER").filter(|value| !value.is_empty()) {
+        // Harness-only deterministic provider: a local script emits AGY-shaped
+        // envelopes through the same supervised process path.
+        provider = provider.with_fake_script(Path::new(&script))?;
+    }
     let executor = Executor::new(
         Path::new(workspace),
         allowed.clone(),
