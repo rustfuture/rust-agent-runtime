@@ -1,0 +1,21 @@
+run_id=controls-20260910T220306Z-invalid-baseline
+requested_run_id=controls-20260910T220306Z-invalid-baseline
+run_id_collisions=0
+model=gemini-3.8-flash-low
+provider_binary=agy
+fake_provider=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fake_providers/success.sh
+fixture_root=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fixtures
+families=passing_baseline
+max_steps=6
+timeout_secs=120
+max_attempts=1
+agent_allowed=cargo
+agent_verify=cargo test
+work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.e2e3Ke
+== family: passing_baseline ==
+harness_failure: baseline unexpectedly passed for passing_baseline
+passing_baseline: pass=false baseline=unexpected_pass harness_ok=true acceptance=false worker_clean=false failure_kind=other
+summary:
+family	baseline_failed_as_expected	harness_ok	patch_acceptance_pass	worker_clean_success	failure_kind	attempts	worker_seconds	input_tokens	output_tokens
+passing_baseline	false	true	false	false	other	0	0	0	0
+exit_status=2

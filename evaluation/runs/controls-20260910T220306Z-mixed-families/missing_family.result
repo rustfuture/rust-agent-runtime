@@ -1,0 +1,11 @@
+family=missing_family
+baseline=missing_fixture
+baseline_failed_as_expected=false
+harness_ok=false
+patch_acceptance_pass=false
+worker_clean_success=false
+failure_kind=other
+attempts=0
+worker_seconds=0
+input_tokens=0
+output_tokens=0
