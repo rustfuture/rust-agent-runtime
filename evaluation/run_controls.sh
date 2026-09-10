@@ -145,7 +145,18 @@ check "success worker clean" true \
 check "success failure kind" none \
   "$(field "$RUNS/$LAST_RUN/off_by_one.result" failure_kind)"
 
-# 7. Same RUN_ID rerun: the second run must not overwrite the first evidence.
+# 7. One family failing (missing fixture) must not stop a later family from
+#    running and being recorded.
+run_harness "$BASE_ID-mixed-families" "$CONTROLS/fake_providers/success.sh" "missing_family off_by_one"
+check "mixed families exit code" 2 "$LAST_STATUS"
+check "mixed families later family still runs" present \
+  "$(present_if "$RUNS/$LAST_RUN/missing_family.result")"
+check "mixed families healthy family passes" true \
+  "$(field "$RUNS/$LAST_RUN/off_by_one.result" worker_clean_success)"
+rows=$(awk 'END { print NR - 1 }' "$RUNS/$LAST_RUN/summary.tsv" 2>/dev/null || echo 0)
+check "mixed families both recorded" 2 "$rows"
+
+# 8. Same RUN_ID rerun: the second run must not overwrite the first evidence.
 run_harness "$BASE_ID-rerun" "$CONTROLS/fake_providers/success.sh" off_by_one
 first_status=$LAST_STATUS
 first_dir="$RUNS/$BASE_ID-rerun"

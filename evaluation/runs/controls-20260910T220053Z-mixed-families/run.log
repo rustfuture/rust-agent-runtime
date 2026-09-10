@@ -1,0 +1,26 @@
+run_id=controls-20260910T220053Z-mixed-families
+requested_run_id=controls-20260910T220053Z-mixed-families
+run_id_collisions=0
+model=gemini-3.8-flash-low
+provider_binary=agy
+fake_provider=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fake_providers/success.sh
+fixture_root=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/fresh_fixtures
+families=missing_family off_by_one
+max_steps=6
+timeout_secs=120
+max_attempts=1
+agent_allowed=cargo
+agent_verify=cargo test
+work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.HDa5TE
+== family: missing_family ==
+harness_failure: fixture /Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/fresh_fixtures/missing_family does not exist for family missing_family
+missing_family: pass=false baseline=missing_fixture harness_ok=false acceptance=false worker_clean=false failure_kind=other
+== family: off_by_one ==
+-- attempt 1 --
+worker_status=0 state=succeeded worker_clean=true acceptance_pass=true failure_kind=none
+off_by_one: pass=true baseline=failed_as_expected harness_ok=true acceptance=true worker_clean=true failure_kind=none
+summary:
+family	baseline_failed_as_expected	harness_ok	patch_acceptance_pass	worker_clean_success	failure_kind	attempts	worker_seconds	input_tokens	output_tokens
+missing_family	false	false	false	false	other	0	0	0	0
+off_by_one	true	true	true	true	none	1	2	200	20
+exit_status=2
