@@ -63,9 +63,20 @@ pub fn run_agent_task(
     }
 
     match result {
-        Ok(report) => {
+        Ok(report) if report.changed_files > 0 && report.verified_after_change => {
             runtime.complete(id, true)?;
             Ok(report)
+        }
+        Ok(_) => {
+            // A finish that changed no source, or changed source without a
+            // passing verification, is not a demonstrated repair.
+            if runtime.task(id).map(|task| task.state) == Some(State::Running) {
+                runtime.complete(id, false)?;
+            }
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "agent finished without a verified source change",
+            ))
         }
         Err(error) => {
             let state = runtime.task(id).map(|task| task.state);

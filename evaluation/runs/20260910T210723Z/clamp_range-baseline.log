@@ -1,0 +1,26 @@
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+clamps_into_range --- FAILED
+
+failures:
+
+---- clamps_into_range stdout ----
+
+thread 'clamps_into_range' (123679) panicked at tests/acceptance.rs:5:5:
+assertion `left == right` failed
+  left: 10
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    clamps_into_range
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test acceptance`

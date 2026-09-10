@@ -1,0 +1,9 @@
+outcome=completed
+summary=The workspace contains an 'off-by-one' crate with sum_up_to, but does not contain the crate with the failing label(prefix, name) test described in the prompt. Cannot proceed.
+steps=1
+tool_runs=0
+changed_files=0
+verified_after_change=false
+input_tokens=79970
+output_tokens=862
+provider_duration_ms=33561

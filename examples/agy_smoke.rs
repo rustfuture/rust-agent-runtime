@@ -13,6 +13,7 @@ fn main() -> io::Result<()> {
     let decision = provider.decide(&DecisionRequest {
         task: "Finish immediately with the exact summary: provider smoke passed".to_owned(),
         allowed_programs: vec![],
+        verification_programs: vec![],
         observations: vec![],
     })?;
     println!("model={}", decision.model);
