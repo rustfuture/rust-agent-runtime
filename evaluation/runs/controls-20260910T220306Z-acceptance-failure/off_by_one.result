@@ -1,0 +1,11 @@
+family=off_by_one
+baseline=failed_as_expected
+baseline_failed_as_expected=true
+harness_ok=true
+patch_acceptance_pass=false
+worker_clean_success=true
+failure_kind=none
+attempts=1
+worker_seconds=1
+input_tokens=200
+output_tokens=20

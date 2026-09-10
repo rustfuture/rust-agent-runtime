@@ -1,0 +1,9 @@
+outcome=completed
+summary=fixed
+steps=4
+tool_runs=1
+changed_files=1
+verified_after_change=true
+input_tokens=200
+output_tokens=20
+provider_duration_ms=52
