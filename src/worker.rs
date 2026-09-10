@@ -151,10 +151,7 @@ mod tests {
                 expected: "bad".to_owned(),
                 replacement: "good".to_owned(),
             },
-            ModelAction::RunTool {
-                program: "true".to_owned(),
-                args: vec![],
-            },
+            ModelAction::Verify,
             ModelAction::Finish {
                 summary: "fixed".to_owned(),
             },
