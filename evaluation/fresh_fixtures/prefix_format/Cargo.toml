@@ -5,3 +5,8 @@ edition = "2021"
 
 [lib]
 path = "src/lib.rs"
+
+# Doctests are disabled so `cargo test` stays inside the workspace when the
+# executor runs it under the macOS Seatbelt profile (rustdoc needs a temp dir
+# outside the workspace). These fixtures contain no doctests.
+doctest = false

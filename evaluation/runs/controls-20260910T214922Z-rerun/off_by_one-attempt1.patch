@@ -1,0 +1,12 @@
+diff -ruN --exclude=target /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.wEVVTg/pristine/off_by_one/src/lib.rs /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.wEVVTg/agent/off_by_one-att1/src/lib.rs
+--- /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.wEVVTg/pristine/off_by_one/src/lib.rs	2026-09-11 00:49:40
++++ /var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.wEVVTg/agent/off_by_one-att1/src/lib.rs	2026-09-11 00:49:41
+@@ -1,7 +1,7 @@
+ /// Return the sum of the integers from 1 through `n` inclusive.
+ pub fn sum_up_to(n: u32) -> u32 {
+     let mut sum = 0;
+-    for i in 1..n {
++    for i in 1..=n {
+         sum += i;
+     }
+     sum
