@@ -118,71 +118,17 @@ impl Executor {
                 command
             }
         };
-        #[cfg(unix)]
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setpgid(0, 0) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+        isolate_process_group(&mut command);
         let mut child = command
             .current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        let mut stdout_handle = child.stdout.take().unwrap();
-        let mut stderr_handle = child.stderr.take().unwrap();
 
-        let max_bytes = self.max_output_bytes as u64;
-        let stdout_thread = thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let mut chunk = vec![0; 4096];
-            let mut truncated = false;
-            while buffer.len() < max_bytes as usize {
-                let to_read = std::cmp::min(4096, max_bytes as usize - buffer.len());
-                match stdout_handle.read(&mut chunk[..to_read]) {
-                    Ok(0) => break,
-                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
-                    Err(_) => break,
-                }
-            }
-            // Check if there's more available without blocking?
-            // Actually, if we just drop stdout_handle, the child gets SIGPIPE.
-            // But let's check if it's truncated by reading one more byte.
-            if buffer.len() == max_bytes as usize {
-                let mut tiny = [0; 1];
-                if let Ok(1) = stdout_handle.read(&mut tiny) {
-                    truncated = true;
-                }
-            }
-            drop(stdout_handle);
-            (String::from_utf8_lossy(&buffer).into_owned(), truncated)
-        });
-
-        let stderr_thread = thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let mut chunk = vec![0; 4096];
-            let mut truncated = false;
-            while buffer.len() < max_bytes as usize {
-                let to_read = std::cmp::min(4096, max_bytes as usize - buffer.len());
-                match stderr_handle.read(&mut chunk[..to_read]) {
-                    Ok(0) => break,
-                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
-                    Err(_) => break,
-                }
-            }
-            if buffer.len() == max_bytes as usize {
-                let mut tiny = [0; 1];
-                if let Ok(1) = stderr_handle.read(&mut tiny) {
-                    truncated = true;
-                }
-            }
-            drop(stderr_handle);
-            (String::from_utf8_lossy(&buffer).into_owned(), truncated)
-        });
+        let max_bytes = self.max_output_bytes;
+        let (stdout_data, stdout_done) = spawn_pipe_reader(child.stdout.take().unwrap(), max_bytes);
+        let (stderr_data, stderr_done) = spawn_pipe_reader(child.stderr.take().unwrap(), max_bytes);
         let mut timed_out = false;
         let mut cancelled = false;
         let status = loop {
@@ -201,8 +147,26 @@ impl Executor {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        let (stdout, stdout_truncated) = stdout_thread.join().unwrap();
-        let (stderr, stderr_truncated) = stderr_thread.join().unwrap();
+        // A descendant that inherited the pipe keeps the write end open after the
+        // direct child exits, so the reader may never see EOF. Wait only a bounded
+        // grace period, then return the captured output instead of blocking.
+        let grace = Duration::from_millis(500);
+        let _ = stdout_done.recv_timeout(grace);
+        let _ = stderr_done.recv_timeout(grace);
+        let (stdout, stdout_truncated) = {
+            let data = stdout_data.lock().unwrap();
+            (
+                String::from_utf8_lossy(&data.bytes).into_owned(),
+                data.truncated,
+            )
+        };
+        let (stderr, stderr_truncated) = {
+            let data = stderr_data.lock().unwrap();
+            (
+                String::from_utf8_lossy(&data.bytes).into_owned(),
+                data.truncated,
+            )
+        };
         Ok(Execution {
             status,
             timed_out,
@@ -215,7 +179,68 @@ impl Executor {
     }
 }
 
-fn terminate_child(child: &mut std::process::Child) -> io::Result<()> {
+#[derive(Default)]
+pub(crate) struct PipeData {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) truncated: bool,
+}
+
+/// Reads a child pipe into a shared buffer up to `max_bytes`, then signals
+/// completion. Leaving the returned receiver un-drained never blocks the caller.
+pub(crate) fn spawn_pipe_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    max_bytes: usize,
+) -> (
+    Arc<std::sync::Mutex<PipeData>>,
+    std::sync::mpsc::Receiver<()>,
+) {
+    let shared = Arc::new(std::sync::Mutex::new(PipeData::default()));
+    let writer = Arc::clone(&shared);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        let mut total = 0usize;
+        loop {
+            let remaining = max_bytes.saturating_sub(total);
+            if remaining == 0 {
+                break;
+            }
+            let to_read = remaining.min(chunk.len());
+            match reader.read(&mut chunk[..to_read]) {
+                Ok(0) => break,
+                Ok(n) => {
+                    writer.lock().unwrap().bytes.extend_from_slice(&chunk[..n]);
+                    total += n;
+                }
+                Err(_) => break,
+            }
+        }
+        if total >= max_bytes {
+            let mut tiny = [0u8; 1];
+            if let Ok(1) = reader.read(&mut tiny) {
+                writer.lock().unwrap().truncated = true;
+            }
+        }
+        let _ = done_tx.send(());
+    });
+    (shared, done_rx)
+}
+
+/// Put the child in its own process group so a timeout or cancellation can
+/// terminate it and its descendants without signalling the worker.
+pub(crate) fn isolate_process_group(_command: &mut std::process::Command) {
+    #[cfg(unix)]
+    unsafe {
+        _command.pre_exec(|| {
+            if libc::setpgid(0, 0) == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+pub(crate) fn terminate_child(child: &mut std::process::Child) -> io::Result<()> {
     #[cfg(unix)]
     {
         // The child creates its own process group in pre_exec; a negative pid
@@ -320,6 +345,26 @@ mod tests {
         assert!(result.timed_out);
         std::thread::sleep(Duration::from_millis(150));
         assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn returns_without_waiting_for_a_descendant_holding_the_pipe() {
+        let root = workspace("descendant-pipe");
+        let executor =
+            Executor::new(&root, ["sh".to_owned()], Duration::from_secs(10), 1024).unwrap();
+        let started = Instant::now();
+        // The shell exits immediately, but the backgrounded sleep inherits the
+        // stdout/stderr pipes, so an unbounded reader join would wait for it.
+        let result = executor
+            .run(&root, "sh", &["-c", "sleep 5 & exit 0"])
+            .unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(result.status, Some(0));
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "run waited {elapsed:?} for a descendant that kept the pipe open"
+        );
     }
 
     #[cfg(target_os = "macos")]
