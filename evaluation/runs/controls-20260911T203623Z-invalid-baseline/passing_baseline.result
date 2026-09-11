@@ -1,0 +1,14 @@
+family=passing_baseline
+family_pass=false
+baseline=unexpected_pass
+baseline_failed_as_expected=false
+harness_ok=true
+patch_acceptance_pass=false
+worker_clean_success=false
+failure_kind=other
+attempts=0
+attempts_acceptance_pass=0
+attempts_worker_clean=0
+worker_seconds=0
+input_tokens=0
+output_tokens=0

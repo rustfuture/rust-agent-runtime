@@ -16,11 +16,13 @@
 # Per-family results are recorded separately:
 #   baseline_failed_as_expected, harness_ok, patch_acceptance_pass,
 #   worker_clean_success, failure_kind (step_limit | wall_timeout | cancelled |
-#   provider_error | other | none).
+#   provider_error | other | none). Those fields always describe one single
+#   attempt, never a combination across attempts; per-attempt rows are kept in
+#   <family>-attempts.tsv.
 #
 # Acceptance policy for the process exit code:
 #   0  every family passed baseline, harness, independent acceptance, and a
-#      clean worker terminal state;
+#      clean worker terminal state within the same attempt;
 #   2  a harness/build failure occurred for any family (build, copy, config,
 #      evidence write) even if other families ran;
 #   1  the harness was mechanically sound but at least one family did not fully
@@ -188,9 +190,12 @@ while [ "$index" -lt "$family_count" ]; do
   pristine="$WORK/pristine/$family"
   baseline=missing_fixture
   harness_ok=true
+  family_pass=false
   family_acceptance=false
   family_clean=false
   family_failure_kind=none
+  attempts_acceptance_pass=0
+  attempts_worker_clean=0
   family_attempts=0
   worker_seconds=0
   input_tokens=0
@@ -234,7 +239,7 @@ while [ "$index" -lt "$family_count" ]; do
   while [ "$harness_ok" = true ] \
     && [ "$baseline" = "failed_as_expected" ] \
     && [ "$attempt" -le "$MAX_ATTEMPTS" ] \
-    && { [ "$family_acceptance" != true ] || [ "$family_clean" != true ]; }; do
+    && [ "$family_pass" != true ]; do
     family_attempts=$((family_attempts + 1))
     agent_ws="$WORK/agent/$family-att$attempt"
     data_dir="$OUT/data/$family-att$attempt"
@@ -318,7 +323,6 @@ while [ "$index" -lt "$family_count" ]; do
         failure_kind=other
       fi
     fi
-    family_failure_kind="$failure_kind"
 
     acceptance=false
     accept="$WORK/accept/$family-att$attempt"
@@ -335,13 +339,26 @@ while [ "$index" -lt "$family_count" ]; do
     else
       fail_harness "acceptance copy failed for $family attempt $attempt; acceptance was not run"
       harness_ok=false
-      family_failure_kind=other
+      failure_kind=other
     fi
+    # One attempt is one record. The recorded fields describe the passing
+    # attempt if there is one, otherwise the latest attempt tried; acceptance
+    # from one attempt is never latched onto a clean worker from another.
     if [ "$acceptance" = true ]; then
-      family_acceptance=true
+      attempts_acceptance_pass=$((attempts_acceptance_pass + 1))
     fi
     if [ "$worker_clean" = true ]; then
-      family_clean=true
+      attempts_worker_clean=$((attempts_worker_clean + 1))
+    fi
+    family_acceptance="$acceptance"
+    family_clean="$worker_clean"
+    family_failure_kind="$failure_kind"
+    if [ "$harness_ok" = true ] \
+      && [ "$baseline" = "failed_as_expected" ] \
+      && [ "$acceptance" = true ] \
+      && [ "$worker_clean" = true ] \
+      && [ "$failure_kind" = "none" ]; then
+      family_pass=true
     fi
 
     diff -ruN --exclude=target "$pristine" "$agent_ws" > "$OUT/$family-attempt$attempt.patch" 2>/dev/null || true
@@ -358,11 +375,10 @@ while [ "$index" -lt "$family_count" ]; do
     family_failure_kind=${family_failure_kind:-other}
     family_acceptance=false
     family_clean=false
+    family_pass=false
   fi
-  if [ "$family_failure_kind" = "none" ] && [ "$family_acceptance" = true ] && [ "$family_clean" = true ]; then
-    pass=true
-  else
-    pass=false
+  pass="$family_pass"
+  if [ "$pass" != true ]; then
     all_pass=false
   fi
 
@@ -370,6 +386,7 @@ while [ "$index" -lt "$family_count" ]; do
   [ "$baseline" = "failed_as_expected" ] && baseline_ok=true
   {
     echo "family=$family"
+    echo "family_pass=$pass"
     echo "baseline=$baseline"
     echo "baseline_failed_as_expected=$baseline_ok"
     echo "harness_ok=$harness_ok"
@@ -377,6 +394,8 @@ while [ "$index" -lt "$family_count" ]; do
     echo "worker_clean_success=$family_clean"
     echo "failure_kind=$family_failure_kind"
     echo "attempts=$family_attempts"
+    echo "attempts_acceptance_pass=$attempts_acceptance_pass"
+    echo "attempts_worker_clean=$attempts_worker_clean"
     echo "worker_seconds=$worker_seconds"
     echo "input_tokens=$input_tokens"
     echo "output_tokens=$output_tokens"

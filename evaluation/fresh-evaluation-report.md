@@ -18,7 +18,9 @@ it never contains the expected/replacement strings or the solution code. Success
 copied over a fresh pristine crate whose canonical test is kept outside the agent workspace, and that
 crate is compiled and tested. A model that edited or deleted the visible test cannot pass this gate.
 
-Each family is allowed at most one controlled retry. All attempts are kept.
+Each family is allowed at most one controlled retry. All attempts are kept, and a family passes only
+when one single attempt satisfies every gate; acceptance from one attempt is never combined with a
+clean worker from another.
 
 ## Verification contract (what changed for this round)
 
@@ -48,11 +50,15 @@ output-cap, cancellation, and restart-recovery behavior.
 - A colliding `RUN_ID` is suffixed (`-1`, `-2`, …); existing evidence is preserved.
 - One family failing cannot stop the other families.
 - Process exit code: `0` only when every family passes baseline, harness, independent acceptance, and
-  a clean worker terminal state; `2` for any harness/build failure; `1` for partial results.
+  a clean worker terminal state **within the same attempt**; `2` for any harness/build failure; `1`
+  for partial results. Per-attempt rows stay in `<family>-attempts.tsv`, and the per-family record
+  always describes a single attempt (the passing one if any, otherwise the latest tried), so
+  acceptance from one attempt can never be combined with a clean worker from another.
 - `summary.tsv` records per-family `baseline_failed_as_expected`, `harness_ok`,
   `patch_acceptance_pass`, `worker_clean_success`, `failure_kind`
   (`step_limit | wall_timeout | cancelled | provider_error | other | none`), attempts, duration, and
-  tokens.
+  tokens; `<family>.result` additionally records `family_pass`, `attempts_acceptance_pass`, and
+  `attempts_worker_clean` as separate counters that never feed the pass gate.
 - Only the temporary work directory created by the run is removed; all evidence stays.
 
 Fixtures set `doctest = false`: rustdoc creates its scratch directory in `$TMPDIR`, which the macOS
@@ -67,7 +73,7 @@ timeout, captured-output cap, process group, and cancellation remain enforced, a
 pass through the executor allowlist (also covered by `src/provider.rs` unit tests and
 `tests/cli_fake_provider.rs`).
 
-Final control run `evaluation/runs/controls-20260910T220053Z-*` (28 checks, 0 failures):
+Final control run `evaluation/runs/controls-20260911T203623Z-*` (36 checks, 0 failures):
 
 | Control | Expected | Observed |
 |---|---|---|
@@ -76,9 +82,30 @@ Final control run `evaluation/runs/controls-20260910T220053Z-*` (28 checks, 0 fa
 | acceptance failure (agent weakens the visible test) | exit 1, worker clean, acceptance fails | pass |
 | correct patch but no verify (step limit) | exit 1, acceptance pass, `failure_kind=step_limit` | pass |
 | correct patch but provider wall timeout | exit 1, acceptance pass, `failure_kind=wall_timeout` | pass |
+| opposite attempts (attempt 1 acceptance pass + worker failure, attempt 2 clean worker + acceptance failure) | exit 1, `family_pass=false`, both attempts recorded separately | pass |
 | fully successful run | exit 0, acceptance pass, worker clean, `failure_kind=none` | pass |
 | mixed families (missing fixture then off_by_one) | exit 2, failing family recorded, later family still runs and passes | pass |
 | same `RUN_ID` rerun | first evidence preserved, second run suffixed `-1` | pass |
+
+### Attempt-consistency regression (2026-09-11)
+
+The base harness (commit `a6cb005`) latched `family_acceptance` and `family_clean` independently
+across attempts (`evaluation/run_fresh_evaluation.sh:340-345` and `:362` on that base). An attempt
+that passed acceptance but failed the worker, followed by an attempt that was worker-clean but failed
+acceptance, combined into `patch_acceptance_pass=true` + `worker_clean_success=true` and exit 0 even
+though no single attempt met both gates. The fix records each attempt as its own row and computes the
+family pass only from a single attempt (baseline failed as expected, harness ok, independent
+acceptance pass, clean worker, `failure_kind=none`); the separate `attempts_acceptance_pass` and
+`attempts_worker_clean` counters are evidence only and never feed the pass gate.
+
+Reproduced against the base harness with the new
+`evaluation/controls/fake_providers/opposite_attempts.sh`: attempt 1 applies the correct
+`1..n` → `1..=n` patch and reaches the step limit; attempt 2 cleanly finishes after weakening the
+visible test. Base result: `patch_acceptance_pass=true`, `worker_clean_success=true`,
+`failure_kind=none`, `exit_status=0`. Fixed result: `family_pass=false`, `exit_status=1`, with
+attempt 1 recorded as `acceptance=true, worker_clean=false, failure_kind=step_limit` and attempt 2 as
+`acceptance=false, worker_clean=true, failure_kind=none` in
+`evaluation/runs/controls-20260911T203623Z-opposite-attempts/`.
 
 ## Real-model run `20260910T215500Z-real` (primary)
 
