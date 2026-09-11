@@ -18,6 +18,9 @@
 #                                worker dirty with failure_kind=step_limit
 #   wall timeout ............... correct patch, provider stalls; acceptance
 #                                passes, worker dirty with failure_kind=wall_timeout
+#   opposite attempts .......... attempt 1 acceptance pass + worker failure,
+#                                attempt 2 clean worker + acceptance failure;
+#                                the family must not combine them into a pass
 #   success .................... correct patch + verify + finish; exit 0
 #   same RUN_ID rerun .......... second run is suffixed, first evidence stays
 set -uo pipefail
@@ -80,6 +83,10 @@ field() {
   awk -F= -v key="$2" '$1 == key { print $2 }' "$1" 2>/dev/null
 }
 
+attempt_field() {
+  awk -F'\t' -v row="$2" -v col="$3" 'NR == row { print $col }' "$1" 2>/dev/null
+}
+
 present_if() {
   if [ -f "$1" ]; then
     echo present
@@ -135,7 +142,29 @@ check "wall timeout worker not clean" false \
 check "wall timeout failure kind" wall_timeout \
   "$(field "$RUNS/$LAST_RUN/off_by_one.result" failure_kind)"
 
-# 6. Fully successful run.
+# 6. Opposite attempts must never combine into a pass: attempt 1 passes
+#    independent acceptance but fails the worker (step limit); attempt 2 is a
+#    clean worker success that weakens the visible test, so independent
+#    acceptance fails. No single attempt meets both gates.
+run_harness "$BASE_ID-opposite-attempts" "$CONTROLS/fake_providers/opposite_attempts.sh" off_by_one \
+  EVAL_MAX_ATTEMPTS=2
+check "opposite attempts exit code" 1 "$LAST_STATUS"
+check "opposite attempts family does not pass" false \
+  "$(field "$RUNS/$LAST_RUN/off_by_one.result" family_pass)"
+check "opposite attempts attempts recorded" 2 \
+  "$(awk 'END { print NR }' "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 2>/dev/null || echo 0)"
+check "opposite attempts attempt 1 acceptance passes" true \
+  "$(attempt_field "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 1 6)"
+check "opposite attempts attempt 1 worker not clean" false \
+  "$(attempt_field "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 1 5)"
+check "opposite attempts attempt 1 failure kind" step_limit \
+  "$(attempt_field "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 1 7)"
+check "opposite attempts attempt 2 acceptance fails" false \
+  "$(attempt_field "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 2 6)"
+check "opposite attempts attempt 2 worker clean" true \
+  "$(attempt_field "$RUNS/$LAST_RUN/off_by_one-attempts.tsv" 2 5)"
+
+# 7. Fully successful run.
 run_harness "$BASE_ID-success" "$CONTROLS/fake_providers/success.sh" off_by_one
 check "success exit code" 0 "$LAST_STATUS"
 check "success acceptance passes" true \
@@ -145,7 +174,7 @@ check "success worker clean" true \
 check "success failure kind" none \
   "$(field "$RUNS/$LAST_RUN/off_by_one.result" failure_kind)"
 
-# 7. One family failing (missing fixture) must not stop a later family from
+# 8. One family failing (missing fixture) must not stop a later family from
 #    running and being recorded.
 run_harness "$BASE_ID-mixed-families" "$CONTROLS/fake_providers/success.sh" "missing_family off_by_one"
 check "mixed families exit code" 2 "$LAST_STATUS"
@@ -156,7 +185,7 @@ check "mixed families healthy family passes" true \
 rows=$(awk 'END { print NR - 1 }' "$RUNS/$LAST_RUN/summary.tsv" 2>/dev/null || echo 0)
 check "mixed families both recorded" 2 "$rows"
 
-# 8. Same RUN_ID rerun: the second run must not overwrite the first evidence.
+# 9. Same RUN_ID rerun: the second run must not overwrite the first evidence.
 run_harness "$BASE_ID-rerun" "$CONTROLS/fake_providers/success.sh" off_by_one
 first_status=$LAST_STATUS
 first_dir="$RUNS/$BASE_ID-rerun"
