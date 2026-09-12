@@ -21,6 +21,28 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
 
+  controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Configure controls run stamp
+        run: echo "EVAL_CONTROLS_STAMP=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+      - name: Run deterministic evaluation controls (fake provider, no model)
+        env:
+          AGY_BIN: /usr/bin/false
+        run: |
+          set -o pipefail
+          bash evaluation/run_controls.sh 2>&1 | tee "evaluation/runs/controls-${EVAL_CONTROLS_STAMP}-ci.log"
+      - name: Upload controls evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-controls-evidence-${{ env.EVAL_CONTROLS_STAMP }}
+          path: evaluation/runs/controls-${{ env.EVAL_CONTROLS_STAMP }}*
+          if-no-files-found: error
+
   msrv:
     runs-on: ubuntu-latest
     steps:
