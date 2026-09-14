@@ -3,8 +3,8 @@ requested_run_id=controls-20260910T220306Z-build-failure
 run_id_collisions=0
 model=gemini-3.8-flash-low
 provider_binary=agy
-fake_provider=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fake_providers/success.sh
-fixture_root=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/fresh_fixtures
+fake_provider=<repo>/evaluation/controls/fake_providers/success.sh
+fixture_root=<repo>/evaluation/fresh_fixtures
 families=off_by_one
 max_steps=6
 timeout_secs=120
@@ -12,4 +12,4 @@ max_attempts=1
 agent_allowed=cargo
 agent_verify=cargo test
 work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.ovAjDZ
-build_failure: /Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/rust-agent-runtime/evaluation/controls/fake_cargo_fail.sh build --locked --quiet failed (see build.log)
+build_failure: <repo>/evaluation/controls/fake_cargo_fail.sh build --locked --quiet failed (see build.log)
