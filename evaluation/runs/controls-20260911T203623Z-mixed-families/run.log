@@ -3,8 +3,8 @@ requested_run_id=controls-20260911T203623Z-mixed-families
 run_id_collisions=0
 model=gemini-3.8-flash-low
 provider_binary=agy
-fake_provider=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/worktrees/agent-a/evaluation/controls/fake_providers/success.sh
-fixture_root=/Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/worktrees/agent-a/evaluation/fresh_fixtures
+fake_provider=<repo>/evaluation/controls/fake_providers/success.sh
+fixture_root=<repo>/evaluation/fresh_fixtures
 families=missing_family off_by_one
 max_steps=6
 timeout_secs=120
@@ -13,7 +13,7 @@ agent_allowed=cargo
 agent_verify=cargo test
 work=/var/folders/v1/5g8zpd5j0h56kyw4dn14f_g40000gn/T//agent-eval.pHt5dw
 == family: missing_family ==
-harness_failure: fixture /Users/macintosh/Documents/Codex/2026-09-06/sana-bi-plan-vericem-bu-plan/worktrees/agent-a/evaluation/fresh_fixtures/missing_family does not exist for family missing_family
+harness_failure: fixture <repo>/evaluation/fresh_fixtures/missing_family does not exist for family missing_family
 missing_family: pass=false baseline=missing_fixture harness_ok=false acceptance=false worker_clean=false failure_kind=other
 == family: off_by_one ==
 -- attempt 1 --

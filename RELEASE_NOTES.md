@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.1.1 — publication hardening
+
+- Current evaluation evidence is summarized without presenting the historical pre-hardening score
+  as the latest result.
+- Machine-specific checkout paths were removed from tracked evidence.
+- The positive provider parsing test now has CI scheduling headroom; dedicated timeout tests retain
+  their short deadlines.
+- Contribution and security reporting guidance are included for public review.
+
 ## 0.1.0 — runtime core candidate
 
 - Durable append-only task states and attempt counts.

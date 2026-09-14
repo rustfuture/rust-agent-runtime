@@ -1,48 +1,34 @@
 # Rust Agent Runtime
 
-A durable task-state baseline for a bounded coding-agent runtime.
+[![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
 
-The first milestone intentionally contains no LLM and no arbitrary shell execution. It provides append-only task events, idempotent enqueue, attempts, cancellation, and restart recovery that requeues interrupted running tasks.
+A durable, bounded Rust runtime for experimenting with coding-agent workflows.
+
+The project separates model decisions from tool authority. A provider can request a structured
+action, but file access and subprocess execution remain subject to limits enforced by the runtime.
+It is a research prototype, not a general-purpose security sandbox.
+
+## What it demonstrates
+
+- Append-only task state with idempotent enqueue, explicit retry, cancellation, and restart recovery.
+- Allowlisted subprocess execution with workspace containment, timeouts, bounded output, and Unix
+  process-group termination.
+- Structured provider decisions, streamed text events, usage metadata, and a step-bounded agent loop.
+- Exact-match file edits followed by an operator-defined verification command that the model cannot
+  replace or extend.
+- Independent evaluation fixtures that keep acceptance tests outside the model-visible workspace.
+- An opt-in macOS Seatbelt backend that denies network access and writes outside the workspace.
+
+## Quick start
+
+Rust 1.85 or newer is required.
 
 ```bash
+cargo build --locked
 cargo test --locked
 ```
 
-The bounded executor rejects program paths and non-allowlisted programs, canonicalizes the working directory under the configured workspace, kills timed-out children and Unix descendants in their process group, disables stdin, and truncates captured stdout/stderr at a configured byte limit. These controls are not an OS sandbox and do not by themselves isolate network access. If a descendant inherits a pipe and keeps it open after the direct child exits, the executor stops reading after a short bounded grace period instead of blocking.
-
-The provider adapter runs its child process under the same supervisor: a dedicated process group, a local wall-clock timeout, a captured-output byte limit, and cancellation. The runtime's `--print-timeout` is a secondary bound; a cancelled task kills the active provider process group, and streaming is stopped by a watchdog. Killing a timed-out or cancelled process is termination, not isolation.
-
-`Runtime::run_next` deterministically selects the lowest queued task id, persists `running`, executes through the bounded executor, and records `succeeded` only for a zero exit status without timeout; all other outcomes become `failed`.
-
-A clonable cancellation token is checked while a child runs. Cancellation kills the child, marks the execution as cancelled, and persists the task’s `cancelled` state.
-
-Each completed command also appends a durable execution trace containing its attempt, program name, argument count, exit status, timeout/cancellation flags, bounded-output sizes, truncation flag, and duration. Argument values and captured output are deliberately not written to the event log. On restart, a matching completed trace is reconciled to its terminal state instead of repeating that command. Failed tasks can be explicitly requeued with `Runtime::retry(id, max_attempts)`; retries are never automatic, because callers must decide whether an operation is safe to repeat.
-
-The next layer exposes a model-provider trait, a structured AGY provider, and a step-bounded agent loop. The provider uses `gemini-3.8-flash-low` in the included smoke example, records reported token usage and latency, and requests schema-constrained actions in plan/sandbox mode. Model-requested tools still pass through the executor, so model or repository text cannot add a program to the allowlist.
-
-```bash
-smoke_dir=$(mktemp -d)
-AGY_BIN=/path/to/agy AGY_WORK_DIR="$smoke_dir" cargo run --locked --example agy_smoke
-```
-
-The real smoke call on 2026-09-06 returned the required structured `finish` action in 8.522 seconds. AGY reported 35,067 input and 47 output tokens; the unexpectedly high fixed context overhead is why live model calls are kept out of normal CI and used only at explicit evaluation milestones.
-
-`AgyProvider::stream_text` consumes AGY's NDJSON event stream and emits response deltas through a callback while retaining final usage metadata. A real Rust adapter smoke returned `STREAM_OK` in 6.860 seconds with 34,752 input and 3 output tokens:
-
-```bash
-stream_dir=$(mktemp -d)
-AGY_BIN=/path/to/agy AGY_WORK_DIR="$stream_dir" cargo run --locked --example agy_stream_smoke
-```
-
-The end-to-end fixture evaluation suite tests the runtime against failing Rust tests across multiple defect families, giving the model only bounded file read/exact replacement and allowlisted `cargo` execution. See [`evaluation/fixture-evaluation-report.md`](evaluation/fixture-evaluation-report.md) for the multi-fixture matrix (covering `off_by_one`, `clamp_range`, and `prefix_format`), patch diffs, latency, token usage, and limitation analysis.
-
-After any edit, the agent loop rejects a model-declared finish until the model requests the `verify` action and the configured verification command succeeds. The model cannot add flags or substitute a command: `verify` runs exactly the operator-configured `AGENT_VERIFY` program and arguments through the bounded executor. A successful `run_tool` never clears verification debt, an empty verification list permits no edit to be verified, and each new edit invalidates the previous verification. A passing command is still not proof of semantic correctness: project-specific evaluation must independently check the intended behavior, and a no-edit finish is not a demonstrated repair.
-
-The multi-fixture evaluation includes successful repairs (2/4), a budget-limited failure (1/4), and an unresolved premature exit (1/4), giving a 50.0% completion rate on the synthetic suite. This metric is documented truthfully as a bounded suite measurement rather than a generalized autonomy claim.
-
-On macOS, callers can opt into `Isolation::MacOsSandbox`. The generated Seatbelt profile denies network access and denies writes outside the canonical workspace; a platform-gated test executes a real shell and proves both the denied outside write and an allowed inside write. This backend depends on the currently installed `/usr/bin/sandbox-exec`. No equivalent Linux backend is implemented yet, so the same isolation claim is not made there.
-
-The included terminal dashboard exposes durable task state and the latest tool/duration without modifying worker state:
+Exercise the durable task state without a model:
 
 ```bash
 cargo run --locked -- enqueue ./runtime-data demo-task
@@ -50,15 +36,98 @@ cargo run --locked -- status ./runtime-data
 cargo run --locked -- watch ./runtime-data 500
 ```
 
-`cancel` accepts only queued/running tasks and is idempotent for an already-cancelled task. `status` and `watch` use a read-only replay path, so observing a running task cannot trigger restart recovery.
-
-The `run` command connects a durable task to the agent loop:
+The `run` command connects a queued task to the bounded agent loop:
 
 ```bash
-AGENT_TASK="make the failing test pass" AGENT_ALLOWED="cargo" AGENT_VERIFY="cargo test" \
-  cargo run --locked -- run ./runtime-data demo-task ./fixture
+AGENT_TASK="make the failing test pass" \
+AGENT_ALLOWED="cargo" \
+AGENT_VERIFY="cargo test" \
+AGY_BIN=/path/to/agy \
+cargo run --locked -- run ./runtime-data demo-task ./fixture
 ```
 
-It enqueues the id if absent, records `running` before any model call, persists each completed tool run as a tool trace, and writes a terminal state. A separate `cancel DATA_DIR ID` process is observed through the event log and signals the live worker's cancellation token (the CLI `cancel` uses the read-only replay path so it does not requeue a running task as a side effect). Tool traces are stored apart from task-level traces, so an interrupted worker is requeued on restart rather than being mistaken for a completed command. A crash after an external side effect but before its trace is synced cannot be made exactly-once by this local log; side-effecting tools still need idempotency keys.
+`AGENT_VERIFY` is parsed once by the operator-facing CLI. After an edit, only the explicit `verify`
+action runs that exact command and clears verification debt. A successful arbitrary tool call cannot
+substitute for verification.
 
-See `docs/architecture.md` for the trust boundary and `RELEASE_NOTES.md` for the current candidate scope. Licensed under MIT.
+## Provider boundary
+
+The included AGY adapter requests schema-constrained actions from `gemini-3.8-flash-low`. It runs the
+provider process with a local wall-clock timeout, captured-output limit, cancellation propagation,
+and its own process group. Model-requested tools return to the Rust executor and still pass through
+the program allowlist and workspace checks.
+
+Real provider calls are opt-in and are not part of normal CI:
+
+```bash
+provider_dir=$(mktemp -d)
+AGY_BIN=/path/to/agy AGY_WORK_DIR="$provider_dir" \
+  cargo run --locked --example agy_smoke
+```
+
+`AgyProvider::stream_text` also consumes AGY's newline-delimited event stream while retaining the
+final token and latency metadata. See `examples/agy_stream_smoke.rs` for the minimal adapter example.
+
+## Evaluation evidence
+
+The current evaluation uses three defect families: `off_by_one`, `clamp_range`, and
+`prefix_format`. The model can inspect and edit only the fixture source; an independent acceptance
+crate is assembled after the run.
+
+- Primary real-model run: 3/3 independent acceptance passes and 3/3 clean worker completions.
+- Confirmation run: 3/3 acceptance passes and 2/3 clean worker completions. The remaining worker
+  received provider HTTP 503 responses after producing and verifying the accepted patch.
+- Aggregate: 6/6 accepted patches and 5/6 clean worker completions across the two recorded runs.
+- Deterministic CI controls: 36 checks covering invalid baselines, acceptance failures, timeouts,
+  step limits, mixed families, reruns, and successful completion.
+
+These are small fixture measurements, not a generalized autonomy score. Full commands, per-family
+results, latency, tokens, patches, and failure analysis are in
+[`evaluation/fresh-evaluation-report.md`](evaluation/fresh-evaluation-report.md). The earlier
+[`evaluation/fixture-evaluation-report.md`](evaluation/fixture-evaluation-report.md) is retained as a
+historical pre-hardening result rather than presented as the current score.
+
+## Architecture and durability
+
+The runtime reconstructs state by replaying an append-only event log. It records `running` before a
+model call or tool execution and persists metadata-only traces for completed commands. On restart, a
+matching completed trace is reconciled instead of repeating the command; an interrupted run without
+a completed trace is requeued with its attempt count preserved.
+
+Argument values and captured output are deliberately excluded from durable traces to reduce secret
+retention. This does not create exactly-once semantics for external side effects: tools that mutate
+remote systems still need their own idempotency key or transaction boundary.
+
+The terminal interface provides enqueue, run, cancel, status, and watch commands. Status views use a
+read-only replay path and do not trigger recovery as a side effect of observation.
+
+See [`docs/architecture.md`](docs/architecture.md) for component and trust boundaries.
+
+## Security boundaries
+
+- The default executor is not an OS sandbox. An allowlisted program can exercise any capability the
+  host grants it unless an isolation backend removes that capability.
+- Workspace containment restricts paths accepted by runtime file operations; it does not hide
+  environment variables or constrain CPU and memory.
+- Timeout and cancellation terminate the child process group but cannot undo earlier side effects.
+- The macOS Seatbelt backend is opt-in. No equivalent Linux isolation backend is claimed.
+- Automatic merge, unrestricted shell execution, and network isolation on every platform are out of
+  scope for this release.
+
+Report sensitive issues according to [`SECURITY.md`](SECURITY.md).
+
+## Development
+
+```bash
+cargo fmt --check
+cargo check --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+bash evaluation/run_controls.sh
+```
+
+CI runs the Rust checks on stable, checks the MSRV, and executes the deterministic evaluation
+controls without contacting a model. Contribution expectations are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Licensed under the MIT License.
