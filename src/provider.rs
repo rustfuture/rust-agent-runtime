@@ -563,7 +563,10 @@ mod tests {
             Path::new("/bin/true"),
             &root,
             "fake-model",
-            Duration::from_secs(2),
+            // This is a positive parsing test, not a timeout assertion. Leave enough
+            // headroom for a loaded CI runner while the dedicated timeout tests below
+            // retain their short, behavior-checking deadlines.
+            Duration::from_secs(5),
         )
         .unwrap()
         .with_fake_script(&script)
