@@ -1,25 +1,25 @@
-== control controls-20260911T203623Z-build-failure exit=2
+== control controls-20260916T201603Z-build-failure exit=2
 PASS build failure exit code (expected=2 actual=2)
 PASS build failure marker (expected=present actual=present)
 PASS build failure did not write a family result (expected=missing actual=missing)
-== control controls-20260911T203623Z-invalid-baseline exit=2
+== control controls-20260916T201603Z-invalid-baseline exit=2
 PASS invalid baseline exit code (expected=2 actual=2)
 PASS invalid baseline is not expected (expected=false actual=false)
-== control controls-20260911T203623Z-acceptance-failure exit=1
+== control controls-20260916T201603Z-acceptance-failure exit=1
 PASS acceptance failure exit code (expected=1 actual=1)
 PASS acceptance failure worker clean (expected=true actual=true)
 PASS acceptance failure rejected (expected=false actual=false)
-== control controls-20260911T203623Z-step-limit exit=1
+== control controls-20260916T201603Z-step-limit exit=1
 PASS step limit exit code (expected=1 actual=1)
 PASS step limit acceptance passes (expected=true actual=true)
 PASS step limit worker not clean (expected=false actual=false)
 PASS step limit failure kind (expected=step_limit actual=step_limit)
-== control controls-20260911T203623Z-wall-timeout exit=1
+== control controls-20260916T201603Z-wall-timeout exit=1
 PASS wall timeout exit code (expected=1 actual=1)
 PASS wall timeout acceptance passes (expected=true actual=true)
 PASS wall timeout worker not clean (expected=false actual=false)
 PASS wall timeout failure kind (expected=wall_timeout actual=wall_timeout)
-== control controls-20260911T203623Z-opposite-attempts exit=1
+== control controls-20260916T201603Z-opposite-attempts exit=1
 PASS opposite attempts exit code (expected=1 actual=1)
 PASS opposite attempts family does not pass (expected=false actual=false)
 PASS opposite attempts attempts recorded (expected=2 actual=2)
@@ -28,20 +28,3 @@ PASS opposite attempts attempt 1 worker not clean (expected=false actual=false)
 PASS opposite attempts attempt 1 failure kind (expected=step_limit actual=step_limit)
 PASS opposite attempts attempt 2 acceptance fails (expected=false actual=false)
 PASS opposite attempts attempt 2 worker clean (expected=true actual=true)
-== control controls-20260911T203623Z-success exit=0
-PASS success exit code (expected=0 actual=0)
-PASS success acceptance passes (expected=true actual=true)
-PASS success worker clean (expected=true actual=true)
-PASS success failure kind (expected=none actual=none)
-== control controls-20260911T203623Z-mixed-families exit=2
-PASS mixed families exit code (expected=2 actual=2)
-PASS mixed families later family still runs (expected=present actual=present)
-PASS mixed families healthy family passes (expected=true actual=true)
-PASS mixed families both recorded (expected=2 actual=2)
-== control controls-20260911T203623Z-rerun exit=0
-== control controls-20260911T203623Z-rerun exit=0
-PASS same-run-id first exit code (expected=0 actual=0)
-PASS same-run-id second exit code (expected=0 actual=0)
-PASS same-run-id first evidence preserved (expected=present actual=present)
-PASS same-run-id second run suffixed (expected=present actual=present)
-controls: 36 checks, 0 failures
