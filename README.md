@@ -1,9 +1,7 @@
+<h1 align="center">Rust Agent Runtime</h1>
 <p align="center">
-  <h1 align="center">Rust Agent Runtime</h1>
-  <p align="center">
-    Durable, bounded execution for coding-agent experiments — model decisions separated
-    from tool authority.
-  </p>
+  Durable, bounded execution for coding-agent experiments — model decisions separated
+  from tool authority.
 </p>
 
 <p align="center">
