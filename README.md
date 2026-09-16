@@ -1,5 +1,30 @@
 # Rust Agent Runtime
 
+
+## Quick Start: Hello World Agent
+
+Want to see it in action without the academic jargon? This is how you run a durable agent that won't lose its state if your server crashes:
+
+```rust
+use rust_agent_runtime::{Agent, Task};
+
+fn main() {
+    // 1. Create a simple task
+    let task = Task::new("Say Hello", "Print a greeting to the console");
+    
+    // 2. Initialize the agent runtime
+    let mut agent = Agent::new();
+    
+    // 3. Execute! If the process dies here, the state is saved.
+    agent.execute(task);
+    println!("Task completed durably!");
+}
+```
+Run the full example from the repo:
+```bash
+cargo run --example hello_agent
+```
+
 [![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
 
 A durable, bounded Rust runtime for experimenting with coding-agent workflows.
