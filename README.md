@@ -122,7 +122,7 @@ See [`docs/architecture.md`](docs/architecture.md) for component and trust bound
 
 This project demonstrates several advanced engineering practices suitable for a FAANG-level environment:
 
-- **Durable Execution State:** Implements an event-sourced architecture for append-only task state, ensuring idempotency, crash recovery, and exactly-once state transitions for execution boundaries (Note: external side effects are NOT exactly-once).
+- **Durable Execution State:** Implements an event-sourced architecture for append-only task state, ensuring idempotency, crash recovery, and durable state transitions for execution boundaries (Note: external side effects are NOT exactly-once).
 - **Strict Isolation & Security:** Utilizes a bounded executor with Unix process-group termination, strict workspace containment, and an opt-in macOS Seatbelt profile to prevent unauthorized side effects.
 - **Robust System Programming:** Showcases safe systems programming in Rust, handling complex OS-level interactions (pipes, process groups, timeouts) and deterministic testing.
 
