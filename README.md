@@ -19,10 +19,9 @@
   <a href="#security-boundaries">Security</a>
 </p>
 
-A durable, bounded Rust runtime for experimenting with coding-agent workflows. A provider
-can request a structured action, but file access and subprocess execution remain subject to
-limits enforced by the runtime. This is a research prototype, **not** a general-purpose
-security sandbox.
+A Rust runtime for coding-agent experiments. A provider can request a structured action, but
+file access and subprocess execution stay subject to limits enforced by the runtime. It is a
+research prototype, **not** a general-purpose security sandbox.
 
 ## Capabilities
 
