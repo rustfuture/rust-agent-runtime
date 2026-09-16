@@ -1,29 +1,7 @@
 # Rust Agent Runtime
 
 
-## Quick Start: Hello World Agent
 
-Want to see it in action without the academic jargon? This is how you run a durable agent that won't lose its state if your server crashes:
-
-```rust
-use rust_agent_runtime::{Agent, Task};
-
-fn main() {
-    // 1. Create a simple task
-    let task = Task::new("Say Hello", "Print a greeting to the console");
-    
-    // 2. Initialize the agent runtime
-    let mut agent = Agent::new();
-    
-    // 3. Execute! If the process dies here, the state is saved.
-    agent.execute(task);
-    println!("Task completed durably!");
-}
-```
-Run the full example from the repo:
-```bash
-cargo run --example hello_agent
-```
 
 [![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
 
@@ -144,10 +122,9 @@ See [`docs/architecture.md`](docs/architecture.md) for component and trust bound
 
 This project demonstrates several advanced engineering practices suitable for a FAANG-level environment:
 
-- **Durable Execution State:** Implements an event-sourced architecture for append-only task state, ensuring idempotency, crash recovery, and exactly-once semantics for execution boundaries.
+- **Durable Execution State:** Implements an event-sourced architecture for append-only task state, ensuring idempotency, crash recovery, and exactly-once state transitions for execution boundaries (Note: external side effects are NOT exactly-once).
 - **Strict Isolation & Security:** Utilizes a bounded executor with Unix process-group termination, strict workspace containment, and an opt-in macOS Seatbelt profile to prevent unauthorized side effects.
 - **Robust System Programming:** Showcases safe systems programming in Rust, handling complex OS-level interactions (pipes, process groups, timeouts) and deterministic testing.
-- **Observability and Benchmarking:** Incorporates clear observability boundaries and performance benchmarking (Criterion) to ensure the runtime remains highly performant under load.
 
 
 ## Security boundaries
