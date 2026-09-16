@@ -89,6 +89,18 @@ historical pre-hardening result rather than presented as the current score.
 
 ## Architecture and durability
 
+```mermaid
+flowchart TD
+    A[Enqueue Task] --> B[Append Event]
+    B --> C[Queued]
+    C --> D[Running]
+    D --> E[Bounded Executor]
+    E -- Timeout / Cancel / Output Cap --> F[Terminal State]
+    E -- Succeeded / Failed --> F
+    F --> G[Append Event]
+    H[Restart Recovery] -.-> C
+```
+
 The runtime reconstructs state by replaying an append-only event log. It records `running` before a
 model call or tool execution and persists metadata-only traces for completed commands. On restart, a
 matching completed trace is reconciled instead of repeating the command; an interrupted run without
@@ -102,6 +114,16 @@ The terminal interface provides enqueue, run, cancel, status, and watch commands
 read-only replay path and do not trigger recovery as a side effect of observation.
 
 See [`docs/architecture.md`](docs/architecture.md) for component and trust boundaries.
+
+## Engineering Value / Portfolio Showcase
+
+This project demonstrates several advanced engineering practices suitable for a FAANG-level environment:
+
+- **Durable Execution State:** Implements an event-sourced architecture for append-only task state, ensuring idempotency, crash recovery, and exactly-once semantics for execution boundaries.
+- **Strict Isolation & Security:** Utilizes a bounded executor with Unix process-group termination, strict workspace containment, and an opt-in macOS Seatbelt profile to prevent unauthorized side effects.
+- **Robust System Programming:** Showcases safe systems programming in Rust, handling complex OS-level interactions (pipes, process groups, timeouts) and deterministic testing.
+- **Observability and Benchmarking:** Incorporates clear observability boundaries and performance benchmarking (Criterion) to ensure the runtime remains highly performant under load.
+
 
 ## Security boundaries
 
