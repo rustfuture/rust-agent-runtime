@@ -1,23 +1,19 @@
 # Rust Agent Runtime
 
-A bounded task runtime and evaluation harness for autonomous coding-agent experiments, separating model decisions from execution authority.
+Rust Agent Runtime executes automated coding tasks using language models while enforcing execution timeouts, command restrictions, and verification tests.
 
 [![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Status:** Research prototype (pre-1.0; bounded subprocess execution, append-only task recovery, and deterministic evaluation controls; not a general-purpose security sandbox).
+**Status:** Research prototype (pre-1.0; bounded execution; not a general security sandbox).
 
-- **Durable task lifecycle:** Reconstructs task state via an append-only event log with idempotent enqueue, retry bounds, cancellation, and restart recovery.
-- **Bounded subprocess execution:** Runs allowlisted programs in a canonical workspace directory with wall-clock timeouts, captured output byte caps, and Unix process-group termination.
-- **Separated model authority:** Constrains model providers (such as AGY, the Google Antigravity command-line client used here to call Gemini models) to structured actions and streamed text events while enforcing tool execution through the runtime.
-- **Verification debt:** Enforces that file edits require passing an operator-configured verification command before a task can complete.
-- **Independent acceptance evaluation:** Validates agent patches against external acceptance fixtures isolated from the agent's workspace.
+- Reconstructs task state from an append-only event log with restart recovery.
+- Runs allowlisted commands with timeouts, output caps, and process-group termination.
+- Routes model actions through the runtime rather than letting models execute directly.
+- Requires passing a verification test command after any workspace file edit.
+- Validates patches against external acceptance tests isolated from the workspace.
 
----
-
-[Quick Start](#quick-start) · [Architecture](#architecture) · [Evaluation Evidence](#evaluation-evidence) · [Durability](#durability) · [Scope and Limitations](#scope-and-limitations) · [License](#license)
-
-## Quick Start
+## Quick start
 
 Rust 1.85 or newer is required.
 
@@ -30,7 +26,7 @@ cargo test --locked
 
 ### Exercise task lifecycle (offline)
 
-The CLI manages durable tasks without requiring an external model:
+The CLI manages durable tasks without an external model:
 
 ```bash
 # Enqueue a demo task
@@ -45,7 +41,7 @@ cargo run --locked -- cancel ./runtime-data demo-task
 
 ### Run with a model provider
 
-When an AGY provider binary is configured, connect a queued task to the bounded agent loop:
+When an AGY provider binary is configured (Google Antigravity command-line client, used to call Gemini models), connect a queued task to the agent loop:
 
 ```bash
 AGENT_TASK="make the failing test pass" \
@@ -55,7 +51,7 @@ AGY_BIN=/path/to/agy \
 cargo run --locked -- run ./runtime-data demo-task ./fixture
 ```
 
-The terminal interface provides `enqueue`, `run`, `cancel`, `status`, and `watch`. Status views use a read-only replay path and do not trigger recovery as a side effect of observation.
+The terminal interface supports `enqueue`, `run`, `cancel`, `status`, and `watch`. Status views replay the event log read-only without triggering recovery side effects.
 
 ## Architecture
 
@@ -70,25 +66,17 @@ flowchart TD
     S --> L
 ```
 
-The runtime reconstructs state by replaying the event log. It records `running` before a model call or tool execution and persists metadata-only traces for completed commands. On restart, a matching completed trace is reconciled instead of repeating the command; an interrupted run without a completed trace is requeued with its attempt count preserved.
-
-`AGENT_VERIFY` is parsed once by the operator-facing CLI. After an edit, only the explicit `verify` action runs that exact command and clears verification debt. A successful arbitrary tool call cannot substitute for verification.
-
-Detailed component design, process supervision, and trust boundaries are documented in [`docs/architecture.md`](docs/architecture.md).
+- The operator enqueues a task, which the runtime logs in an append-only event file.
+- The worker marks the task running and requests structured decisions from the model provider.
+- The executor runs allowlisted commands inside the workspace with timeouts and output limits.
+- Any workspace edit incurs verification debt, requiring the configured verification command to pass.
+- The worker records execution traces and final status to the log; details are in [`docs/architecture.md`](docs/architecture.md).
 
 ## Provider Boundary
 
-The included AGY adapter requests schema-constrained actions and runs the provider process with a local wall-clock timeout, captured-output limit, cancellation propagation, and its own process group. Model-requested tools return to the Rust executor and still pass through the program allowlist and workspace checks.
+The AGY adapter runs provider processes under wall-clock timeouts, output limits, and process-group supervision. Model-requested tools return to the runtime executor to pass allowlist and workspace checks. Real provider calls are opt-in and omitted from CI; see [`docs/reference.md`](docs/reference.md) for smoke test commands and event streaming.
 
-Real provider calls are opt-in and are not part of normal CI:
-
-```bash
-provider_dir=$(mktemp -d)
-AGY_BIN=/path/to/agy AGY_WORK_DIR="$provider_dir" \
-  cargo run --locked --example agy_smoke
-```
-
-`AgyProvider::stream_text` consumes AGY's newline-delimited event stream while retaining final token and latency metadata; see [`examples/agy_stream_smoke.rs`](examples/agy_stream_smoke.rs).
+`AgyProvider::stream_text` consumes AGY's newline-delimited event stream and keeps the final token and latency metadata; see [`examples/agy_stream_smoke.rs`](examples/agy_stream_smoke.rs).
 
 ## Evaluation Evidence
 
@@ -103,53 +91,35 @@ These are small fixture measurements, not a generalized autonomy score. Full com
 
 ## Durability
 
-- State is an append-only event log; enqueue is idempotent and retries are recorded as distinct attempts.
-- Completed commands are reconciled from metadata-only traces on restart instead of being repeated.
-- Argument values and captured output are deliberately excluded from durable traces to reduce secret retention.
-- **External side effects are not exactly-once.** A crash after a side effect but before its trace is synced cannot be made whole by this local log; tools that mutate remote systems need their own idempotency key or transaction boundary.
-- Timeout and cancellation terminate the child process group but cannot undo side effects that already occurred.
+- State is stored in an append-only event log with idempotent enqueue and retry tracking.
+- Completed commands reconcile from metadata-only traces on restart rather than repeating execution.
+- Command arguments and outputs are excluded from traces to prevent secret retention.
+- External side effects are not exactly-once; external systems require their own idempotency keys.
+- Process-group termination halts running processes on timeout or cancellation, but cannot revert earlier side effects.
 
-See [`docs/architecture.md`](docs/architecture.md) for durability and reconciliation specifics.
+Details on state recovery and reconciliation are documented in [`docs/architecture.md`](docs/architecture.md).
 
 ## Scope and Limitations
 
-- **Not an OS sandbox by default:** The default executor relies on command allowlisting, path containment, output limits, and process-group termination. Allowed programs run with host user privileges unless an external isolation backend is configured.
-- **Platform-dependent isolation:** The opt-in Seatbelt profile (`/usr/bin/sandbox-exec`) is available only on macOS. No Linux namespace or cgroup isolation backend is provided.
-- **Non-atomic external side effects:** While internal task transitions and completed command metadata are durably logged, mutations to external systems (such as network APIs or remote repositories) cannot be rolled back upon crash or cancellation without external transaction management.
-- **Side effects prior to termination:** Process-group termination (`SIGKILL`) on timeout or cancellation halts the active process group, but cannot revert filesystem changes or child process side effects that occurred before termination.
-- **Synthetic evaluation suite:** The evaluation covers three synthetic defect families (`off_by_one`, `clamp_range`, `prefix_format`); it validates runtime mechanics rather than broad agent capability or general programming tasks.
-- **Provider scope:** The included provider adapter targets AGY / Gemini CLI; direct SDK clients for OpenAI/Anthropic APIs, automated PR merge flows, and multi-agent swarms are out of scope.
+- The default executor relies on command allowlists, path containment, output limits, and process-group termination rather than an OS sandbox.
+- The optional Seatbelt profile (`/usr/bin/sandbox-exec`) is available only on macOS.
+- Mutations to external systems (such as network APIs or remote repositories) cannot be rolled back on crash or cancellation.
+- Process-group termination halts running processes on timeout or cancellation, but does not revert earlier filesystem changes.
+- The evaluation suite covers three synthetic defect families to test runtime mechanics rather than broad programming autonomy.
+- The included provider adapter targets AGY / Gemini CLI; direct SDK clients and multi-agent swarms are out of scope.
 
-Report sensitive security issues according to [`SECURITY.md`](SECURITY.md).
+Report security issues according to [`SECURITY.md`](SECURITY.md).
 
-## Development
-
-Run the CI checks locally:
+## Tests
 
 ```bash
-cargo fmt --check
-cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-bash evaluation/run_controls.sh
 ```
 
-CI runs the Rust checks on stable, verifies the MSRV (1.85.0), and executes the deterministic evaluation controls without contacting an external model. Contribution guidelines are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The test suite covers task lifecycle transitions, bounded subprocess execution, workspace containment, and model provider schema integration.
 
-## Repository Map
-
-| Path | Contents |
-|---|---|
-| `src/lib.rs`, `src/worker.rs` | Event-sourced task state, recovery, worker loop |
-| `src/agent.rs` | Step-bounded agent loop and verification debt |
-| `src/executor.rs` | Bounded subprocess execution and process groups |
-| `src/provider.rs` | AGY adapter, timeouts, output caps, stream parsing |
-| `src/workspace.rs` | Workspace containment and exact-match edits |
-| `src/main.rs` | Terminal interface (`enqueue`, `run`, `cancel`, `status`, `watch`) |
-| `evaluation/` | Fixtures, reports, and deterministic controls |
-| `examples/` | AGY adapter smoke examples |
+Contribution guidelines are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
