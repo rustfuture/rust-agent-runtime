@@ -2,7 +2,7 @@
 
 Date: 2026-09-06  
 Model: `gemini-3.8-flash-low`  
-Runtime commit under test: `09a73f17107448d6d0f270d0bbddde6c9e442bba`
+Runtime commit under test: `6a7d3ee82fb0d967c64c491dc54fd4fa56a00f53`
 Fixture: `fixtures/off_by_one` copied to a fresh temporary directory
 
 ## Task
