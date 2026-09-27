@@ -5,7 +5,7 @@ Model: `gemini-3.8-flash-low` via the AGY structured-output provider
 Provider binary: `agy 1.2.0`
 Runtime: `rust-agent-runtime` (durable worker + bounded executor + macOS seatbelt)
 Host: macOS Apple Silicon, `rustc 1.94.1`
-Code under test: commits `23925b1` (explicit verify action) and `6683999` (trustworthy harness +
+Code under test: commits `5006979` (explicit verify action) and `7abbab0` (trustworthy harness +
 controls); real runs additionally record the harness and binary hashes below.
 Historical runs from before these commits are preserved under `evaluation/runs/`.
 
@@ -89,7 +89,7 @@ Final control run `evaluation/runs/controls-20260911T203623Z-*` (36 checks, 0 fa
 
 ### Attempt-consistency regression (2026-09-11)
 
-The base harness (commit `a6cb005`) latched `family_acceptance` and `family_clean` independently
+The base harness (commit `697ef84`) latched `family_acceptance` and `family_clean` independently
 across attempts (`evaluation/run_fresh_evaluation.sh:340-345` and `:362` on that base). An attempt
 that passed acceptance but failed the worker, followed by an attempt that was worker-clean but failed
 acceptance, combined into `patch_acceptance_pass=true` + `worker_clean_success=true` and exit 0 even
@@ -116,7 +116,7 @@ RUN_ID=20260910T215500Z-real AGY_BIN=agy AGY_MODEL=gemini-3.8-flash-low \
   AGENT_MAX_STEPS=6 AGENT_TIMEOUT_SECS=120 bash evaluation/run_fresh_evaluation.sh
 ```
 
-Metadata: `source_sha=6683999ac5d150591f726a9c68dfecfd1f8a12f1`,
+Metadata: `source_sha=7abbab0588d5c6046b83c9a8e0207c50af1ab251`,
 `harness_sha256=801cd3da31904f87bb0b03fa9324bab67902712c7016e925ff6c745c5a6513ed`,
 binary sha256 `974966a8280f11a52a52074554526291fb4a2ddd03a62ac1c47af0b120942683`,
 `source_dirty_count=2` (the preserved untracked `tests/fixtures/unwrap-panic/Cargo.lock` plus this
@@ -136,7 +136,7 @@ runtime-run verification (`tool cargo argc=1`) with status 0.
 ## Real-model confirmation run `20260910T215600Z-real2`
 
 A second run confirmed the result after a metadata-only harness change (dirty count measured before
-the run directory is created). Metadata: `source_sha=6683999...`, `harness_sha256=6033c654...`,
+the run directory is created). Metadata: `source_sha=7abbab0...`, `harness_sha256=6033c654...`,
 `source_dirty_count=3` (untracked fixture lock, the uncommitted metadata fix, and the first run
 directory).
 

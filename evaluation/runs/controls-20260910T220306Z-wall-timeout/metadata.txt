@@ -1,6 +1,6 @@
 built_binary=<repo>/target/debug/rust-agent-runtime
 built_binary_sha256=974966a8280f11a52a52074554526291fb4a2ddd03a62ac1c47af0b120942683
-source_sha=8ddc7a3b55fbc62fccaf3118c3899cb4ec873496
+source_sha=11821afac9963949be5ed95f1569ab628f847ea7
 source_dirty_count=6
 harness_sha256=6033c654ba994cafad0d5230251938b4b2a4ff1d2178f416785b9ff7fc2cfa64
 provider_version=1.2.0

@@ -9,7 +9,7 @@ A bounded task runtime and evaluation harness for autonomous coding-agent experi
 
 - **Durable task lifecycle:** Reconstructs task state via an append-only event log with idempotent enqueue, retry bounds, cancellation, and restart recovery.
 - **Bounded subprocess execution:** Runs allowlisted programs in a canonical workspace directory with wall-clock timeouts, captured output byte caps, and Unix process-group termination.
-- **Separated model authority:** Constrains model providers (such as AGY) to structured actions and streamed text events while enforcing tool execution through the runtime.
+- **Separated model authority:** Constrains model providers (such as AGY, the Google Antigravity command-line client used here to call Gemini models) to structured actions and streamed text events while enforcing tool execution through the runtime.
 - **Verification debt:** Enforces that file edits require passing an operator-configured verification command before a task can complete.
 - **Independent acceptance evaluation:** Validates agent patches against external acceptance fixtures isolated from the agent's workspace.
 
