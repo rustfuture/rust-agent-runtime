@@ -29,6 +29,14 @@ On macOS, the executor can additionally wrap a command in an opt-in Seatbelt pro
 
 The CLI provides enqueue/cancel commands plus one-shot and refreshing status views. Status uses `Runtime::inspect`, which replays state without performing restart recovery. Only a worker opening the runtime through `Runtime::open` reconciles an interrupted task. Terminal states cannot be cancelled or completed again through the public transition methods.
 
+## Provider trait and extension point
+
+The agent loop is generic over `provider::ModelProvider`, whose only required method is `decide(&mut self, &DecisionRequest) -> io::Result<ModelDecision>`. `decide_cancellable` has a default that ignores the cancellation token; a provider that owns a child process or a network call should override it. A decision carries one `ModelAction` (`run_tool`, `read_file`, `replace_text`, `verify`, `finish`), and the loop treats every action as a request: programs go through the executor allowlist, paths through the workspace editor, and only `verify` clears verification debt. A provider therefore cannot widen what the runtime allows.
+
+To add another provider, implement `ModelProvider` in a new module under `src/provider/` and re-export it from `provider/mod.rs`. It must enforce its own wall-clock timeout and response size bound, honour cancellation, and report failures as `io::Error` rather than panicking. The worker does not retry a failed provider call: a provider error fails the task (a verified edit already on disk stays there), and any retry is an explicit `Runtime::retry`. Only the AGY adapter is included; no network provider exists in this crate.
+
+`provider::mock::MockProvider` replays a scripted list of actions or errors without I/O and records the requests it receives. The agent and worker tests use it.
+
 ## Security boundary
 
 Without the opt-in macOS backend, this is not an OS sandbox. Even with it, environment-variable secrecy, CPU/memory usage, and all platform-specific privilege boundaries are not solved. Unix descendant termination is covered, but commands can still create side effects before a timeout. SIGKILL-terminating a timed-out or cancelled child is termination, not isolation: it does not prevent side effects that already happened or restrict what a running process could do before it was killed. Allowed programs and arguments must still be treated as capabilities. A crash after an external side effect but before its execution trace is synced cannot be made exactly-once by this local log; side-effecting tools need idempotency keys or a transactional adapter.

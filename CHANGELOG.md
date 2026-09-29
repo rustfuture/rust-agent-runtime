@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `provider::mock::MockProvider`, a deterministic scripted provider (including scripted failures)
+  used by the agent and worker tests.
+- Tests for provider outage handling: a provider 503 after a verified patch fails the task while
+  keeping the patch and its verification trace, and the AGY adapter reports a non-zero exit or
+  error envelope as a failure.
+
+### Changed
+
+- Split `provider.rs` into `provider/{mod,decision,agy,mock}.rs`, `agent.rs` into
+  `agent/{mod,verification,observation}.rs`, and moved the event-log line format from `lib.rs`
+  into `event_log.rs`. Public paths (`provider::AgyProvider`, `provider::ModelProvider`,
+  `agent::AgentLoop`, and the rest) are unchanged.
+
+### Fixed
+
+- `AgyProvider::stream_text_cancellable` now terminates and reaps the provider process when its
+  event stream is malformed, instead of leaving it running until the watchdog fires.
+
 ## [0.1.1] - 2026-09-14
 
 ### Changed

@@ -6,10 +6,10 @@ This document provides extended reference details relocated from the main README
 
 | Path | Contents |
 |---|---|
-| `src/lib.rs`, `src/worker.rs` | Event-sourced task state, recovery, worker loop |
-| `src/agent.rs` | Step-bounded agent loop and verification debt |
+| `src/lib.rs`, `src/event_log.rs`, `src/worker.rs` | Event-sourced task state, log line format, recovery, worker loop |
+| `src/agent/` | Step-bounded agent loop (`mod.rs`), verification debt (`verification.rs`), observation truncation (`observation.rs`) |
 | `src/executor.rs` | Bounded subprocess execution and process groups |
-| `src/provider.rs` | AGY adapter, timeouts, output caps, stream parsing |
+| `src/provider/` | `ModelProvider` trait (`mod.rs`), action and request types (`decision.rs`), AGY adapter with timeouts, output caps and stream parsing (`agy.rs`), deterministic scripted provider for tests (`mock.rs`) |
 | `src/workspace.rs` | Workspace containment and exact-match edits |
 | `src/main.rs` | Terminal interface (`enqueue`, `run`, `cancel`, `status`, `watch`) |
 | `evaluation/` | Fixtures, reports, and deterministic controls |
