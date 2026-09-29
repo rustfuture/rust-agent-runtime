@@ -646,4 +646,49 @@ mod tests {
         assert_eq!(output.status, Some(0));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_503_is_a_reported_failure_not_a_decision() {
+        let root = workspace("fake-503");
+        let script = fake_script(
+            &root,
+            "#!/bin/sh\nprintf '%s\\n' '503 The service is currently unavailable' >&2\nexit 1\n",
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let error = provider.decide(&request()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        let message = error.to_string();
+        assert!(message.contains("status Some(1)"), "{message}");
+        assert!(message.contains("503"), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_error_envelope_is_a_reported_failure() {
+        let root = workspace("fake-error-envelope");
+        let script = fake_script(
+            &root,
+            "#!/bin/sh\nprintf '%s\\n' '{\"status\":\"ERROR\"}'\n",
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let error = provider.decide(&request()).unwrap_err();
+        assert!(error.to_string().contains("ERROR"), "{error}");
+    }
 }
