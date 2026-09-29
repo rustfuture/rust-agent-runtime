@@ -320,37 +320,49 @@ impl AgyProvider {
         let mut succeeded = false;
         let mut emitted = 0usize;
         let mut exceeded = false;
-        for line in BufReader::new(stdout).lines() {
-            let line = line?;
-            let event: serde_json::Value = serde_json::from_str(&line)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-            if event.get("event").and_then(|value| value.as_str()) == Some("step_update") {
-                if let Some(delta) = event
-                    .pointer("/step_update/text_delta")
-                    .and_then(|value| value.as_str())
-                {
-                    emitted = emitted.saturating_add(delta.len());
-                    if emitted > self.max_output_bytes {
-                        exceeded = true;
-                        break;
+        let read_result: io::Result<()> = (|| {
+            for line in BufReader::new(stdout).lines() {
+                let line = line?;
+                let event: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                if event.get("event").and_then(|value| value.as_str()) == Some("step_update") {
+                    if let Some(delta) = event
+                        .pointer("/step_update/text_delta")
+                        .and_then(|value| value.as_str())
+                    {
+                        emitted = emitted.saturating_add(delta.len());
+                        if emitted > self.max_output_bytes {
+                            exceeded = true;
+                            break;
+                        }
+                        on_delta(delta);
                     }
-                    on_delta(delta);
+                }
+                if event.get("event").and_then(|value| value.as_str()) == Some("result") {
+                    succeeded = event
+                        .pointer("/result/status")
+                        .and_then(|value| value.as_str())
+                        == Some("SUCCESS");
+                    usage = Some(AgyUsage {
+                        input_tokens: event
+                            .pointer("/result/usage/input_tokens")
+                            .and_then(|value| value.as_u64()),
+                        output_tokens: event
+                            .pointer("/result/usage/output_tokens")
+                            .and_then(|value| value.as_u64()),
+                    });
                 }
             }
-            if event.get("event").and_then(|value| value.as_str()) == Some("result") {
-                succeeded = event
-                    .pointer("/result/status")
-                    .and_then(|value| value.as_str())
-                    == Some("SUCCESS");
-                usage = Some(AgyUsage {
-                    input_tokens: event
-                        .pointer("/result/usage/input_tokens")
-                        .and_then(|value| value.as_u64()),
-                    output_tokens: event
-                        .pointer("/result/usage/output_tokens")
-                        .and_then(|value| value.as_u64()),
-                });
-            }
+            Ok(())
+        })();
+        if let Err(error) = read_result {
+            // A malformed stream must not leave the provider running or
+            // unreaped until the watchdog fires (possibly after pid reuse).
+            let _ = terminate_child(&mut child);
+            let _ = child.wait();
+            finished.store(true, Ordering::SeqCst);
+            let _ = watchdog.join();
+            return Err(error);
         }
 
         if exceeded {
@@ -690,5 +702,39 @@ mod tests {
         .unwrap();
         let error = provider.decide(&request()).unwrap_err();
         assert!(error.to_string().contains("ERROR"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_stream_terminates_and_reaps_the_provider() {
+        let root = workspace("stream-malformed");
+        let pid_file = root.join("provider.pid");
+        let script = fake_script(
+            &root,
+            &format!(
+                "#!/bin/sh\necho $$ > {}\nprintf 'not json\\n'\nexec sleep 30\n",
+                pid_file.display()
+            ),
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(20),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let started = Instant::now();
+        let error = provider.stream_text("hello", |_| {}).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // Signal 0 probes existence: a reaped, killed child no longer exists.
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     }
 }
