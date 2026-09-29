@@ -98,22 +98,9 @@ mod tests {
     use super::*;
     use crate::{
         executor::Executor,
-        provider::{DecisionRequest, ModelAction, ModelDecision, ModelProvider},
+        provider::{mock::MockProvider, ModelAction},
     };
     use std::{collections::VecDeque, fs, path::PathBuf, time::Duration};
-
-    struct ScriptedProvider(VecDeque<ModelAction>);
-    impl ModelProvider for ScriptedProvider {
-        fn decide(&mut self, _: &DecisionRequest) -> io::Result<ModelDecision> {
-            Ok(ModelDecision {
-                action: self.0.pop_front().expect("scripted action"),
-                model: "scripted".to_owned(),
-                duration_ms: 0,
-                input_tokens: None,
-                output_tokens: None,
-            })
-        }
-    }
 
     fn temp() -> PathBuf {
         let nonce = std::time::SystemTime::now()
@@ -145,7 +132,7 @@ mod tests {
         .unwrap();
         let agent =
             AgentLoop::new(4, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
-        let mut provider = ScriptedProvider(VecDeque::from([
+        let mut provider = MockProvider::from_actions(VecDeque::from([
             ModelAction::ReplaceText {
                 path: "bug.txt".to_owned(),
                 expected: "bad".to_owned(),
@@ -192,7 +179,7 @@ mod tests {
         .unwrap();
         let agent =
             AgentLoop::new(3, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
-        let mut provider = ScriptedProvider(VecDeque::new());
+        let mut provider = MockProvider::from_actions([]);
         let token = CancellationToken::default();
         token.cancel();
         let mut runtime = Runtime::open(&dir).unwrap();
