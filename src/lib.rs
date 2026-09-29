@@ -1,9 +1,11 @@
 pub mod agent;
+mod event_log;
 pub mod executor;
 pub mod provider;
 pub mod worker;
 pub mod workspace;
 
+use event_log::{parse_tool_trace, parse_trace, trace_state};
 use executor::{CancellationToken, Execution, Executor};
 
 use std::{
@@ -385,90 +387,6 @@ impl Runtime {
                 attempts,
             },
         );
-    }
-}
-
-fn parse_trace(line: &str) -> Option<(String, ExecutionTrace)> {
-    let mut parts = line.split('\t');
-    if parts.next()? != "trace" {
-        return None;
-    }
-    parse_trace_fields(parts)
-}
-
-fn parse_tool_trace(line: &str) -> Option<(String, ExecutionTrace)> {
-    let mut parts = line.split('\t');
-    if parts.next()? != "tool" {
-        return None;
-    }
-    parse_trace_fields(parts)
-}
-
-fn parse_trace_fields<'a>(
-    mut parts: impl Iterator<Item = &'a str>,
-) -> Option<(String, ExecutionTrace)> {
-    let id = parts.next()?.to_owned();
-    let attempt = parts.next()?.parse().ok()?;
-    let program = parts.next()?.to_owned();
-    let argument_count = parts.next()?.parse().ok()?;
-    let status_text = parts.next()?;
-    let status = if status_text == "none" {
-        None
-    } else {
-        Some(status_text.parse().ok()?)
-    };
-    let timed_out = parts.next()?.parse().ok()?;
-    let cancelled = parts.next()?.parse().ok()?;
-    let output_truncated = parts.next()?.parse().ok()?;
-    let stdout_bytes = parts.next()?.parse().ok()?;
-    let stderr_bytes = parts.next()?.parse().ok()?;
-    let duration_ms = parts.next()?.parse().ok()?;
-    Some((
-        id,
-        ExecutionTrace {
-            attempt,
-            program,
-            argument_count,
-            status,
-            timed_out,
-            cancelled,
-            output_truncated,
-            stdout_bytes,
-            stderr_bytes,
-            duration_ms,
-        },
-    ))
-}
-
-fn trace_state(trace: &ExecutionTrace) -> State {
-    if trace.cancelled {
-        State::Cancelled
-    } else if trace.status == Some(0) && !trace.timed_out {
-        State::Succeeded
-    } else {
-        State::Failed
-    }
-}
-
-impl State {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "queued" => Some(Self::Queued),
-            "running" => Some(Self::Running),
-            "succeeded" => Some(Self::Succeeded),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            _ => None,
-        }
     }
 }
 
