@@ -1,7 +1,8 @@
+use super::{DecisionRequest, ModelDecision, ModelProvider};
 use crate::executor::{
     isolate_process_group, spawn_pipe_reader, terminate_child, CancellationToken,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
@@ -18,47 +19,6 @@ const ACTION_SCHEMA: &str = r#"{"type":"object","properties":{"kind":{"type":"st
 
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ModelAction {
-    RunTool {
-        program: String,
-        #[serde(default)]
-        args: Vec<String>,
-    },
-    ReadFile {
-        path: String,
-    },
-    ReplaceText {
-        path: String,
-        expected: String,
-        replacement: String,
-    },
-    /// Ask the runtime to run the configured verification command exactly as
-    /// configured. The model cannot supply or alter the command.
-    Verify,
-    Finish {
-        summary: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecisionRequest {
-    pub task: String,
-    pub allowed_programs: Vec<String>,
-    pub verification_programs: Vec<String>,
-    pub observations: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelDecision {
-    pub action: ModelAction,
-    pub model: String,
-    pub duration_ms: u128,
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamResult {
     pub model: String,
@@ -74,22 +34,6 @@ struct ProcessOutput {
     status: Option<i32>,
     timed_out: bool,
     cancelled: bool,
-}
-
-pub trait ModelProvider {
-    fn decide(&mut self, request: &DecisionRequest) -> io::Result<ModelDecision>;
-
-    /// Like [`ModelProvider::decide`], but cancellation from the runtime is
-    /// propagated to the active provider process. The default implementation
-    /// ignores the token for providers that do not spawn a child process.
-    fn decide_cancellable(
-        &mut self,
-        request: &DecisionRequest,
-        cancellation: &CancellationToken,
-    ) -> io::Result<ModelDecision> {
-        let _ = cancellation;
-        self.decide(request)
-    }
 }
 
 pub struct AgyProvider {
@@ -462,28 +406,6 @@ impl ModelProvider for AgyProvider {
     }
 }
 
-impl Serialize for DecisionRequest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct View<'a> {
-            task: &'a str,
-            allowed_programs: &'a [String],
-            verification_programs: &'a [String],
-            observations: &'a [String],
-        }
-        View {
-            task: &self.task,
-            allowed_programs: &self.allowed_programs,
-            verification_programs: &self.verification_programs,
-            observations: &self.observations,
-        }
-        .serialize(serializer)
-    }
-}
-
 #[derive(Deserialize)]
 struct AgyEnvelope {
     status: String,
@@ -500,6 +422,7 @@ struct AgyUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::ModelAction;
 
     fn sh_provider(dir: &Path, timeout: Duration, max_output_bytes: usize) -> AgyProvider {
         AgyProvider::new(Path::new("/bin/sh"), dir, "test-model", timeout)
