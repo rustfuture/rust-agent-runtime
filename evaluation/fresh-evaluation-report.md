@@ -73,7 +73,13 @@ timeout, captured-output cap, process group, and cancellation remain enforced, a
 pass through the executor allowlist (also covered by `src/provider.rs` unit tests and
 `tests/cli_fake_provider.rs`).
 
-Final control run `evaluation/runs/controls-20260911T203623Z-*` (36 checks, 0 failures):
+Final control run `controls-20260916T202705Z` (36 checks, 0 failures), as recorded in the committed
+`evaluation/controls/results.log` (regenerated in commit `b22684f` on 2026-09-16). The per-run
+directories `evaluation/runs/controls-20260916T202705Z-*` are **not committed**, so the log is the only
+committed record of that run. An earlier run of the same controls, `controls-20260911T203623Z` (also
+36 checks, 0 failures; log as of commit `f72708f`), has its run directories committed under
+`evaluation/runs/controls-20260911T203623Z-*`; the table below describes the controls, which are the
+same in both runs:
 
 | Control | Expected | Observed |
 |---|---|---|
@@ -105,7 +111,8 @@ visible test. Base result: `patch_acceptance_pass=true`, `worker_clean_success=t
 `failure_kind=none`, `exit_status=0`. Fixed result: `family_pass=false`, `exit_status=1`, with
 attempt 1 recorded as `acceptance=true, worker_clean=false, failure_kind=step_limit` and attempt 2 as
 `acceptance=false, worker_clean=true, failure_kind=none` in
-`evaluation/runs/controls-20260911T203623Z-opposite-attempts/`.
+`evaluation/runs/controls-20260911T203623Z-opposite-attempts/` (the committed run directory of the
+2026-09-11 control run).
 
 ## Real-model run `20260910T215500Z-real` (primary)
 
@@ -146,13 +153,26 @@ directory).
 | `clamp_range` | failed as expected | pass | succeeded | none | 1 | 71 s | clean |
 | `prefix_format` | failed as expected | pass | succeeded | none | 1 | 53 s | clean |
 
-Attempt 1 of `off_by_one` was cut short by the 503 before the patch landed; attempt 2 applied the
+Per-attempt rows (`evaluation/runs/20260910T215600Z-real2/off_by_one-attempts.tsv`): attempt 1
+acceptance `false`, worker not clean; attempt 2 acceptance `true`, worker not clean, both
+`failure_kind=provider_error`. Attempt 1 of `off_by_one` was cut short by the 503 before the patch landed; attempt 2 applied the
 correct patch and the runtime verification passed, but the next provider call also received 503, so
 the worker could not finish. This is an external provider-availability failure, not a step-limit or
 wall-timeout failure, and it is reported as-is.
 
-Aggregate across both real runs: **6/6 independent acceptance passes**, **5/6 clean worker
-successes**; the single non-clean case is the provider 503 above. No fixed claim beyond this suite is
+Two readings of this run, both derived from the recorded per-attempt rows:
+
+- Acceptance: **3/3 after one retry**. `off_by_one` passed acceptance only on its second attempt.
+- Family-pass gate (defined above: one single attempt must satisfy baseline, harness, independent
+  acceptance, clean worker, and `failure_kind=none`): **2/3**. `off_by_one` is `family_pass=false`,
+  because the attempt that passed acceptance (attempt 2) did not have a clean worker, and the clean
+  requirement is never satisfied by another attempt. This run's own result files predate the
+  `family_pass` field (added in commit `f72708f`), so the gate is applied here to the recorded
+  attempt rows, not read from a `family_pass` value.
+
+Aggregate across both real runs: **6/6 independent acceptance passes** (one of them after a retry),
+**5/6 under the family-pass gate** (equal to the 5/6 clean worker successes); the single failing
+family is the provider 503 case above. No fixed claim beyond this suite is
 made: three tiny synthetic crates are not a general benchmark.
 
 ## Historical evidence (preserved)
