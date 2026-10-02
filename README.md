@@ -7,7 +7,8 @@ Rust Agent Runtime executes automated coding tasks using language models while e
 [![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Status:** Research prototype (pre-1.0; bounded execution; not a general security sandbox).
+> [!NOTE]
+> **Status:** Research prototype (pre-1.0; bounded execution; not a general security sandbox).
 
 - Reconstructs task state from an append-only event log with restart recovery.
 - Runs allowlisted commands with timeouts, output caps, and process-group termination.
