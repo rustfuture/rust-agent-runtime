@@ -1,3 +1,5 @@
+mod demo;
+
 use rust_agent_runtime::{
     agent::AgentLoop,
     executor::{CancellationToken, Executor, Isolation},
@@ -29,6 +31,7 @@ fn main() -> ExitCode {
 fn run() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.as_slice() {
+        [command] if command == "demo" => demo::run()?,
         [command, data_dir, id] if command == "enqueue" => {
             let mut runtime = Runtime::open(Path::new(data_dir))?;
             println!("enqueued={}", runtime.enqueue(id)?);
@@ -63,7 +66,7 @@ fn run() -> io::Result<()> {
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "usage: rust-agent-runtime <enqueue DATA_DIR ID | cancel DATA_DIR ID | run DATA_DIR ID WORKSPACE | status DATA_DIR | watch DATA_DIR INTERVAL_MS>",
+                "usage: rust-agent-runtime <demo | enqueue DATA_DIR ID | cancel DATA_DIR ID | run DATA_DIR ID WORKSPACE | status DATA_DIR | watch DATA_DIR INTERVAL_MS>",
             ));
         }
     }
