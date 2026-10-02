@@ -10,6 +10,8 @@ Rust Agent Runtime executes automated coding tasks using language models while e
 > [!NOTE]
 > **Status:** Research prototype (pre-1.0; bounded execution; not a general security sandbox).
 
+![A coding task going through the runtime: a blocked command, a rejected early finish, then done](docs/demo/demo.gif)
+
 - Reconstructs task state from an append-only event log with restart recovery.
 - Runs allowlisted commands with timeouts, output caps, and process-group termination.
 - Routes model actions through the runtime rather than letting models execute directly.
@@ -28,6 +30,7 @@ cd rust-agent-runtime
 
 cargo build --locked
 cargo test --locked
+rust-agent-runtime demo
 ```
 
 ### Exercise task lifecycle (offline)
