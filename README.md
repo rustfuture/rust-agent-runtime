@@ -30,7 +30,7 @@ cd rust-agent-runtime
 
 cargo build --locked
 cargo test --locked
-rust-agent-runtime demo
+cargo run --locked -- demo
 ```
 
 ### Exercise task lifecycle (offline)
