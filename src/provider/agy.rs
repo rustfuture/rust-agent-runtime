@@ -1,7 +1,8 @@
+use super::{DecisionRequest, ModelDecision, ModelProvider};
 use crate::executor::{
     isolate_process_group, spawn_pipe_reader, terminate_child, CancellationToken,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
@@ -18,47 +19,6 @@ const ACTION_SCHEMA: &str = r#"{"type":"object","properties":{"kind":{"type":"st
 
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ModelAction {
-    RunTool {
-        program: String,
-        #[serde(default)]
-        args: Vec<String>,
-    },
-    ReadFile {
-        path: String,
-    },
-    ReplaceText {
-        path: String,
-        expected: String,
-        replacement: String,
-    },
-    /// Ask the runtime to run the configured verification command exactly as
-    /// configured. The model cannot supply or alter the command.
-    Verify,
-    Finish {
-        summary: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecisionRequest {
-    pub task: String,
-    pub allowed_programs: Vec<String>,
-    pub verification_programs: Vec<String>,
-    pub observations: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelDecision {
-    pub action: ModelAction,
-    pub model: String,
-    pub duration_ms: u128,
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamResult {
     pub model: String,
@@ -74,22 +34,6 @@ struct ProcessOutput {
     status: Option<i32>,
     timed_out: bool,
     cancelled: bool,
-}
-
-pub trait ModelProvider {
-    fn decide(&mut self, request: &DecisionRequest) -> io::Result<ModelDecision>;
-
-    /// Like [`ModelProvider::decide`], but cancellation from the runtime is
-    /// propagated to the active provider process. The default implementation
-    /// ignores the token for providers that do not spawn a child process.
-    fn decide_cancellable(
-        &mut self,
-        request: &DecisionRequest,
-        cancellation: &CancellationToken,
-    ) -> io::Result<ModelDecision> {
-        let _ = cancellation;
-        self.decide(request)
-    }
 }
 
 pub struct AgyProvider {
@@ -376,37 +320,49 @@ impl AgyProvider {
         let mut succeeded = false;
         let mut emitted = 0usize;
         let mut exceeded = false;
-        for line in BufReader::new(stdout).lines() {
-            let line = line?;
-            let event: serde_json::Value = serde_json::from_str(&line)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-            if event.get("event").and_then(|value| value.as_str()) == Some("step_update") {
-                if let Some(delta) = event
-                    .pointer("/step_update/text_delta")
-                    .and_then(|value| value.as_str())
-                {
-                    emitted = emitted.saturating_add(delta.len());
-                    if emitted > self.max_output_bytes {
-                        exceeded = true;
-                        break;
+        let read_result: io::Result<()> = (|| {
+            for line in BufReader::new(stdout).lines() {
+                let line = line?;
+                let event: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                if event.get("event").and_then(|value| value.as_str()) == Some("step_update") {
+                    if let Some(delta) = event
+                        .pointer("/step_update/text_delta")
+                        .and_then(|value| value.as_str())
+                    {
+                        emitted = emitted.saturating_add(delta.len());
+                        if emitted > self.max_output_bytes {
+                            exceeded = true;
+                            break;
+                        }
+                        on_delta(delta);
                     }
-                    on_delta(delta);
+                }
+                if event.get("event").and_then(|value| value.as_str()) == Some("result") {
+                    succeeded = event
+                        .pointer("/result/status")
+                        .and_then(|value| value.as_str())
+                        == Some("SUCCESS");
+                    usage = Some(AgyUsage {
+                        input_tokens: event
+                            .pointer("/result/usage/input_tokens")
+                            .and_then(|value| value.as_u64()),
+                        output_tokens: event
+                            .pointer("/result/usage/output_tokens")
+                            .and_then(|value| value.as_u64()),
+                    });
                 }
             }
-            if event.get("event").and_then(|value| value.as_str()) == Some("result") {
-                succeeded = event
-                    .pointer("/result/status")
-                    .and_then(|value| value.as_str())
-                    == Some("SUCCESS");
-                usage = Some(AgyUsage {
-                    input_tokens: event
-                        .pointer("/result/usage/input_tokens")
-                        .and_then(|value| value.as_u64()),
-                    output_tokens: event
-                        .pointer("/result/usage/output_tokens")
-                        .and_then(|value| value.as_u64()),
-                });
-            }
+            Ok(())
+        })();
+        if let Err(error) = read_result {
+            // A malformed stream must not leave the provider running or
+            // unreaped until the watchdog fires (possibly after pid reuse).
+            let _ = terminate_child(&mut child);
+            let _ = child.wait();
+            finished.store(true, Ordering::SeqCst);
+            let _ = watchdog.join();
+            return Err(error);
         }
 
         if exceeded {
@@ -462,28 +418,6 @@ impl ModelProvider for AgyProvider {
     }
 }
 
-impl Serialize for DecisionRequest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct View<'a> {
-            task: &'a str,
-            allowed_programs: &'a [String],
-            verification_programs: &'a [String],
-            observations: &'a [String],
-        }
-        View {
-            task: &self.task,
-            allowed_programs: &self.allowed_programs,
-            verification_programs: &self.verification_programs,
-            observations: &self.observations,
-        }
-        .serialize(serializer)
-    }
-}
-
 #[derive(Deserialize)]
 struct AgyEnvelope {
     status: String,
@@ -500,6 +434,7 @@ struct AgyUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::ModelAction;
 
     fn sh_provider(dir: &Path, timeout: Duration, max_output_bytes: usize) -> AgyProvider {
         AgyProvider::new(Path::new("/bin/sh"), dir, "test-model", timeout)
@@ -722,5 +657,84 @@ mod tests {
             .unwrap();
         assert_eq!(output.status, Some(0));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_503_is_a_reported_failure_not_a_decision() {
+        let root = workspace("fake-503");
+        let script = fake_script(
+            &root,
+            "#!/bin/sh\nprintf '%s\\n' '503 The service is currently unavailable' >&2\nexit 1\n",
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let error = provider.decide(&request()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        let message = error.to_string();
+        assert!(message.contains("status Some(1)"), "{message}");
+        assert!(message.contains("503"), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_error_envelope_is_a_reported_failure() {
+        let root = workspace("fake-error-envelope");
+        let script = fake_script(
+            &root,
+            "#!/bin/sh\nprintf '%s\\n' '{\"status\":\"ERROR\"}'\n",
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(5),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let error = provider.decide(&request()).unwrap_err();
+        assert!(error.to_string().contains("ERROR"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_stream_terminates_and_reaps_the_provider() {
+        let root = workspace("stream-malformed");
+        let pid_file = root.join("provider.pid");
+        let script = fake_script(
+            &root,
+            &format!(
+                "#!/bin/sh\necho $$ > {}\nprintf 'not json\\n'\nexec sleep 30\n",
+                pid_file.display()
+            ),
+        );
+        let mut provider = AgyProvider::new(
+            Path::new("/bin/true"),
+            &root,
+            "fake-model",
+            Duration::from_secs(20),
+        )
+        .unwrap()
+        .with_fake_script(&script)
+        .unwrap();
+        let started = Instant::now();
+        let error = provider.stream_text("hello", |_| {}).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // Signal 0 probes existence: a reaped, killed child no longer exists.
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
     }
 }

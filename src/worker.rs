@@ -98,22 +98,9 @@ mod tests {
     use super::*;
     use crate::{
         executor::Executor,
-        provider::{DecisionRequest, ModelAction, ModelDecision, ModelProvider},
+        provider::{mock::MockProvider, ModelAction},
     };
     use std::{collections::VecDeque, fs, path::PathBuf, time::Duration};
-
-    struct ScriptedProvider(VecDeque<ModelAction>);
-    impl ModelProvider for ScriptedProvider {
-        fn decide(&mut self, _: &DecisionRequest) -> io::Result<ModelDecision> {
-            Ok(ModelDecision {
-                action: self.0.pop_front().expect("scripted action"),
-                model: "scripted".to_owned(),
-                duration_ms: 0,
-                input_tokens: None,
-                output_tokens: None,
-            })
-        }
-    }
 
     fn temp() -> PathBuf {
         let nonce = std::time::SystemTime::now()
@@ -145,7 +132,7 @@ mod tests {
         .unwrap();
         let agent =
             AgentLoop::new(4, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
-        let mut provider = ScriptedProvider(VecDeque::from([
+        let mut provider = MockProvider::from_actions(VecDeque::from([
             ModelAction::ReplaceText {
                 path: "bug.txt".to_owned(),
                 expected: "bad".to_owned(),
@@ -192,7 +179,7 @@ mod tests {
         .unwrap();
         let agent =
             AgentLoop::new(3, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
-        let mut provider = ScriptedProvider(VecDeque::new());
+        let mut provider = MockProvider::from_actions([]);
         let token = CancellationToken::default();
         token.cancel();
         let mut runtime = Runtime::open(&dir).unwrap();
@@ -236,5 +223,61 @@ mod tests {
         assert_eq!(reopened.task("mid-1").unwrap().state, State::Queued);
         assert_eq!(reopened.tool_traces("mid-1").len(), 1);
         assert!(reopened.execution_traces("mid-1").is_empty());
+    }
+
+    #[test]
+    fn provider_503_after_a_verified_patch_fails_the_task_but_keeps_the_patch() {
+        let dir = temp();
+        let workspace = workspace_under(&dir);
+        fs::write(workspace.join("bug.txt"), "bad\n").unwrap();
+        let executor = Executor::new(
+            &workspace,
+            ["true".to_owned()],
+            Duration::from_secs(1),
+            1024,
+        )
+        .unwrap();
+        let agent =
+            AgentLoop::new(6, vec!["true".to_owned()], vec!["true".to_owned()], 1024).unwrap();
+        let mut provider = MockProvider::from_script([
+            Ok(ModelAction::ReplaceText {
+                path: "bug.txt".to_owned(),
+                expected: "bad".to_owned(),
+                replacement: "good".to_owned(),
+            }),
+            Ok(ModelAction::Verify),
+            Err(io::Error::other("503 The service is currently unavailable")),
+        ]);
+        let mut runtime = Runtime::open(&dir).unwrap();
+        let error = run_agent_task(
+            &mut runtime,
+            "outage-1",
+            &agent,
+            &mut provider,
+            &executor,
+            &workspace,
+            "fix the bug",
+            &CancellationToken::default(),
+        )
+        .unwrap_err();
+
+        // The provider error is surfaced unchanged; the worker does not retry.
+        assert!(error.to_string().contains("503"), "{error}");
+        assert_eq!(provider.requests().len(), 3);
+        assert_eq!(provider.remaining(), 0);
+        // The task is failed, not succeeded: no finish was ever accepted.
+        assert_eq!(runtime.task("outage-1").unwrap().state, State::Failed);
+        // The verified edit stays on disk and the verification run is traced.
+        assert_eq!(
+            fs::read_to_string(workspace.join("bug.txt")).unwrap(),
+            "good\n"
+        );
+        assert_eq!(runtime.tool_traces("outage-1").len(), 1);
+        drop(runtime);
+
+        let mut reopened = Runtime::open(&dir).unwrap();
+        assert_eq!(reopened.task("outage-1").unwrap().state, State::Failed);
+        // An explicit, bounded retry is still available to the operator.
+        assert!(reopened.retry("outage-1", 2).unwrap());
     }
 }
