@@ -82,10 +82,10 @@ The AGY adapter runs provider processes under wall-clock timeouts, output limits
 
 The evaluation tests three defect families — `off_by_one`, `clamp_range`, and `prefix_format`. The model can inspect and edit only the fixture source; an independent acceptance crate is assembled after the run.
 
-- **Primary real-model run:** 3/3 independent acceptance passes and 3/3 clean worker completions ([`evaluation/runs/20260910T215500Z-real/`](evaluation/runs/20260910T215500Z-real/)).
-- **Confirmation run:** 3/3 acceptance passes and 2/3 clean worker completions ([`evaluation/runs/20260910T215600Z-real2/`](evaluation/runs/20260910T215600Z-real2/)); the remaining worker received provider HTTP 503 responses after producing and verifying the accepted patch.
-- **Aggregate across real runs:** 6/6 accepted patches and 5/6 clean worker completions across the two recorded runs ([`evaluation/fresh-evaluation-report.md`](evaluation/fresh-evaluation-report.md)).
-- **Deterministic controls:** 36 checks covering invalid baselines, acceptance failures, timeouts, step limits, mixed families, reruns, and successful completion ([`evaluation/controls/results.log`](evaluation/controls/results.log)).
+- **Primary real-model run:** 3/3 independent acceptance passes and 3/3 clean worker completions, every family on its first attempt ([`evaluation/runs/20260910T215500Z-real/`](evaluation/runs/20260910T215500Z-real/)).
+- **Confirmation run:** acceptance 3/3 after one retry (`off_by_one` passed acceptance only on its second attempt, per its `off_by_one-attempts.tsv`); under the report's single-attempt family-pass gate, 2/3 (`off_by_one` is `family_pass=false`: neither attempt had a clean worker, the provider returned HTTP 503 responses) ([`evaluation/runs/20260910T215600Z-real2/`](evaluation/runs/20260910T215600Z-real2/)).
+- **Aggregate across real runs:** acceptance 6/6 (one after a retry); 5/6 under the strict family-pass gate, equal to 5/6 clean worker completions ([`evaluation/fresh-evaluation-report.md`](evaluation/fresh-evaluation-report.md)).
+- **Deterministic controls:** 36 checks covering invalid baselines, acceptance failures, timeouts, step limits, mixed families, reruns, and successful completion ([`evaluation/controls/results.log`](evaluation/controls/results.log)); the run directories behind that log (`controls-20260916T202705Z-*`) are not committed, the log is the record.
 
 These are small fixture measurements, not a generalized autonomy score. Full commands, per-family results, latency, tokens, patches, and failure analysis are documented in [`evaluation/fresh-evaluation-report.md`](evaluation/fresh-evaluation-report.md). The earlier [`evaluation/fixture-evaluation-report.md`](evaluation/fixture-evaluation-report.md) is retained as historical pre-hardening evidence.
 
