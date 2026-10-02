@@ -1,5 +1,7 @@
 # Rust Agent Runtime
 
+![rust-agent-runtime project overview](docs/images/social-preview.png)
+
 Rust Agent Runtime executes automated coding tasks using language models while enforcing execution timeouts, command restrictions, and verification tests.
 
 [![CI](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml/badge.svg)](https://github.com/rustfuture/rust-agent-runtime/actions/workflows/ci.yml)
