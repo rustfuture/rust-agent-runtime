@@ -15,11 +15,14 @@ Rust Agent Runtime executes automated coding tasks using language models while e
 
 ## Quick start
 
-Rust 1.85 or newer is required.
+You need Git and Rust 1.85 or newer, including Cargo ([rustup](https://rustup.rs/)). The first build downloads Cargo dependencies. Run the commands below from the cloned repository.
 
 ### Build and test
 
 ```bash
+git clone https://github.com/rustfuture/rust-agent-runtime.git
+cd rust-agent-runtime
+
 cargo build --locked
 cargo test --locked
 ```
@@ -39,17 +42,24 @@ cargo run --locked -- status ./runtime-data
 cargo run --locked -- cancel ./runtime-data demo-task
 ```
 
+Status lists `demo-task` as queued after enqueue and cancelled after cancel. Records are saved in `runtime-data/events.log`; use a new data directory or task ID when repeating the example. This lifecycle demo requires no model, credentials, or fixture setup.
+
 ### Run with a model provider
 
 When an AGY provider binary is configured (Google Antigravity command-line client, used to call Gemini models), connect a queued task to the agent loop:
 
 ```bash
+# Use a fresh task: demo-task above was cancelled.
+cargo run --locked -- enqueue ./runtime-data coding-task
+
 AGENT_TASK="make the failing test pass" \
 AGENT_ALLOWED="cargo" \
-AGENT_VERIFY="cargo test" \
+AGENT_VERIFY="cargo;test;--locked" \
 AGY_BIN=/path/to/agy \
-cargo run --locked -- run ./runtime-data demo-task ./fixture
+cargo run --locked -- run ./runtime-data coding-task ./tests/fixtures/off-by-one
 ```
+
+The environment-variable example uses a POSIX shell (Bash or zsh). Set `AGY_BIN` to your installed, authenticated provider executable. `AGENT_VERIFY` separates the program and each argument with semicolons, not spaces. The bundled workspace contains a deliberately failing test; this optional run can edit its source. The offline lifecycle demo above does not need this provider setup.
 
 The terminal interface supports `enqueue`, `run`, `cancel`, `status`, and `watch`. Status views replay the event log read-only without triggering recovery side effects.
 
