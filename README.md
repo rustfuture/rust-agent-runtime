@@ -20,6 +20,22 @@ Rust Agent Runtime executes automated coding tasks using language models while e
 
 ## Quick start
 
+### Try the released CLI (macOS or Linux)
+
+The prebuilt CLI does not require Rust. The installer downloads a release, checks its SHA-256 checksum, and installs to `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rustfuture/rust-agent-runtime/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+rust-agent-runtime --version
+# Watch the runtime finish a task with a scripted model; no API key needed
+rust-agent-runtime demo
+```
+
+Prebuilt Linux binaries require glibc; unsupported platforms can build from source. On Windows, use the [PowerShell installer](install.ps1).
+
+### Build from source
+
 You need Git and Rust 1.85 or newer, including Cargo ([rustup](https://rustup.rs/)). The first build downloads Cargo dependencies. Run the commands below from the cloned repository.
 
 ### Build and test

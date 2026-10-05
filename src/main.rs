@@ -31,6 +31,9 @@ fn main() -> ExitCode {
 fn run() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.as_slice() {
+        [flag] if flag == "--version" || flag == "-V" => {
+            println!("rust-agent-runtime {}", env!("CARGO_PKG_VERSION"));
+        }
         [command] if command == "demo" => demo::run()?,
         [command, data_dir, id] if command == "enqueue" => {
             let mut runtime = Runtime::open(Path::new(data_dir))?;
@@ -66,7 +69,7 @@ fn run() -> io::Result<()> {
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "usage: rust-agent-runtime <demo | enqueue DATA_DIR ID | cancel DATA_DIR ID | run DATA_DIR ID WORKSPACE | status DATA_DIR | watch DATA_DIR INTERVAL_MS>",
+                "usage: rust-agent-runtime <--version | demo | enqueue DATA_DIR ID | cancel DATA_DIR ID | run DATA_DIR ID WORKSPACE | status DATA_DIR | watch DATA_DIR INTERVAL_MS>",
             ));
         }
     }
