@@ -1,0 +1,158 @@
+name: Release
+
+# Pushing a tag such as v0.4.0 builds the `rust-agent-runtime` CLI on native runners,
+# packages it and publishes a GitHub release. Running the workflow by hand
+# (workflow_dispatch) builds and uploads the archives as workflow artifacts
+# but never publishes. See docs/releasing.md.
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read workspace version and compare with the tag
+        id: version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "rust-agent-runtime") | .version')"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::could not read the rust-agent-runtime version from Cargo.toml"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version (expected v$version). Fix the version in Cargo.toml or push the right tag."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Linux builds run on the oldest hosted images so the binaries link
+          # against an older glibc (2.35) and run on most current distributions.
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
+          - { target: aarch64-apple-darwin,      os: macos-latest }
+          - { target: x86_64-pc-windows-msvc,    os: windows-latest }
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked -p rust-agent-runtime --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="rust-agent-runtime-${VERSION}-${TARGET}"
+          mkdir -p "dist/${name}"
+          cp "target/${TARGET}/release/rust-agent-runtime" LICENSE "dist/${name}/"
+          cp packaging/README.txt "dist/${name}/README.txt"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          else
+            shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          fi
+          cat "${name}.tar.gz.sha256"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "rust-agent-runtime-$env:VERSION-$env:TARGET"
+          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+          Copy-Item "target/$env:TARGET/release/rust-agent-runtime.exe" "dist/$name/"
+          Copy-Item LICENSE "dist/$name/"
+          Copy-Item packaging/README.txt "dist/$name/README.txt"
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Set-Content -Path "dist/$name.zip.sha256" -Encoding ascii
+          Get-Content "dist/$name.zip.sha256"
+
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="target/${TARGET}/release/rust-agent-runtime"
+          if [ "$RUNNER_OS" = "Windows" ]; then exe="${exe}.exe"; fi
+          out="$("$exe" --version)"
+          echo "$out"
+          case "$out" in
+            *"${VERSION}"*) ;;
+            *) echo "::error::binary reports '$out', expected version ${VERSION}"; exit 1 ;;
+          esac
+
+      - name: Upload archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-runtime-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    # Only for pushed tags; a manual run stops after the build job.
+    if: github.ref_type == 'tag'
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: rust-agent-runtime-*
+          merge-multiple: true
+
+      - name: List files
+        run: ls -l dist
+
+      - name: Create the GitHub release
+        run: |
+          set -euo pipefail
+          flags=""
+          case "$VERSION" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "rust-agent-runtime $VERSION" \
+            --generate-notes \
+            $flags \
+            dist/*.tar.gz dist/*.zip dist/*.sha256

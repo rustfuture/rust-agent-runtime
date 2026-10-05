@@ -4,8 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-05
+
 ### Added
 
+- Prebuilt binaries for Linux (x86_64, aarch64), macOS (Intel, Apple Silicon) and Windows on each release, with SHA-256 files, plus `install.sh` and `install.ps1` installers.
 - `provider::mock::MockProvider`, a deterministic scripted provider (including scripted failures)
   used by the agent and worker tests.
 - Tests for provider outage handling: a provider 503 after a verified patch fails the task while
