@@ -32,6 +32,27 @@ rust-agent-runtime --version
 rust-agent-runtime demo
 ```
 
+Expected output:
+
+```text
+  ╭──────────────────────────────────────────────────╮
+  │ Rust Agent Runtime  ·  one task, start to finish │
+  ╰──────────────────────────────────────────────────╯
+
+   FAIL    test        cargo test --offline --quiet --target-dir target
+           ↳ assertion `left == right` failed
+   BLOCK   stop/retry  curl --version
+           ↳ program is not allowlisted
+   EDIT    replace     src/lib.rs  ·  1..n → 1..=n
+   REJECT  finish      verification still required
+           ↳ finish rejected: run a successful verification command after the latest edit
+   PASS    verify      cargo test --offline --quiet --target-dir target
+   DONE    finish      sum-task
+
+  6 decisions  ·  2 test runs  ·  1 file edited  ·  2 attempts (blocked attempt retried)
+  Decisions come from the real runtime; the model is scripted.
+```
+
 Prebuilt Linux binaries require glibc; unsupported platforms can build from source. On Windows, use the [PowerShell installer](install.ps1).
 
 ### Build from source
@@ -49,6 +70,8 @@ cargo test --locked
 cargo run --locked -- demo
 ```
 
+The demo prints the same output as shown above for the released CLI.
+
 ### Exercise task lifecycle (offline)
 
 The CLI manages durable tasks without an external model:
@@ -60,8 +83,20 @@ cargo run --locked -- enqueue ./runtime-data demo-task
 # Check task status (replays event log read-only)
 cargo run --locked -- status ./runtime-data
 
-# Cancel the task
+# Cancel the task and check again
 cargo run --locked -- cancel ./runtime-data demo-task
+cargo run --locked -- status ./runtime-data
+```
+
+Expected output:
+
+```text
+enqueued=true
+TASK	STATE	ATTEMPTS	LAST_TOOL	LAST_MS
+demo-task	Queued	0	-	-
+cancelled=demo-task
+TASK	STATE	ATTEMPTS	LAST_TOOL	LAST_MS
+demo-task	Cancelled	0	-	-
 ```
 
 Status lists `demo-task` as queued after enqueue and cancelled after cancel. Records are saved in `runtime-data/events.log`; use a new data directory or task ID when repeating the example. This lifecycle demo requires no model, credentials, or fixture setup.
